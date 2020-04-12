@@ -3,12 +3,15 @@
  * @author Jacob Salzberg (jssalzbe)
  * @file fst_fast.c
  */
+#include <fst_fast.h>
 #include <memory.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
 
 // This is basically a header.
 // The formal definition is
@@ -50,18 +53,6 @@
  * Whether the fst state is final
  */
 #define FST_FLAG_FINAL (1 << 2)
-
-typedef union FstStateEntry FstStateEntry;
-
-union FstStateEntry {
-  struct FstStateEntryComponents {
-    char flags;
-    char outchar;
-    unsigned short out_state;
-  } components;
-
-  int entry;
-};
 
 // Compile the FST a:a
 // AKA:
@@ -335,6 +326,111 @@ void create_pegreg_abk(unsigned char *outbuff) {
   }
 }
 
+void fse_clear_flag(FstStateEntry *fse) {
+  fse->components.flags = 0;
+}
+
+void fse_set_initial_flag(FstStateEntry *fse) {
+  fse->components.flags |= FST_FLAG_INITIAL;
+}
+
+void fse_set_valid_flag(FstStateEntry *fse) {
+  fse->components.flags |= FST_FLAG_VALID;
+}
+
+void fse_set_final_flags(InstructionTape *instrtape) {
+  FstStateEntry *fse = (FstStateEntry *) instrtape->current;
+  for (int i = 0; i < 256; i++) {
+    fse->components.flags |= FST_FLAG_FINAL;
+    fse += 1;
+  }
+}
+
+void fse_set_initial_flags(InstructionTape *instrtape) {
+  FstStateEntry *fse = (FstStateEntry *) instrtape->current;
+  for (int i = 0; i < 256; i++) {
+    fse->components.flags |= FST_FLAG_INITIAL;
+    fse += 1;
+  }
+}
+
+void fse_set_outchar(FstStateEntry *fse, char a) {
+  fse->components.outchar = a;
+}
+
+void fse_set_outstate(FstStateEntry *fse, int outstate) {
+  fse->components.out_state = outstate;
+}
+
+/**
+ * Initialize FSE tape
+ */
+void fse_initialize_tape(InstructionTape *instrtape) {
+  instrtape->capacity = 10;
+  instrtape->beginning = malloc(10 * sizeof(FstStateEntry) * 256);
+  if (!(instrtape->beginning)) {
+    perror("Memory allocation failure");
+    exit(1);
+  }
+  instrtape->current = instrtape->beginning;
+  instrtape->length = 0;
+  instrtape->capacity = 0;
+}
+
+/**
+ * Grow instruction tape if neccessary
+ */
+void fse_grow(InstructionTape *instrtape, int targetlen) {
+  if (instrtape->capacity <= targetlen) {
+    instrtape->capacity = MAX(instrtape->capacity * 2, targetlen);
+    instrtape->beginning =
+        realloc(instrtape->beginning,
+                instrtape->capacity * sizeof(FstStateEntry) * 256);
+    if (!(instrtape->beginning)) {
+      perror("Memory allocation failure");
+      exit(1);
+    }
+  }
+};
+
+/**
+ * Clear an entire instruction
+ */
+void fse_clear_instr(InstructionTape *instrtape, int errorstate) {
+  fse_grow(instrtape, instrtape->length + 1);
+  instrtape->length += 1;
+
+  FstStateEntry *fse = (FstStateEntry *) instrtape->current;
+  for (int i = 0; i < 256; i++) {
+    fse_clear_flag(fse);
+    fse_set_valid_flag(fse);
+    fse_set_outchar(fse, 0);
+    fse_set_outstate(fse, errorstate);
+    fse += 1;
+  }
+}
+
+/**
+ * Get the outgoing edge on the character
+ */
+FstStateEntry *fse_get_outgoing(InstructionTape *instrtape, char c) {
+  return ((FstStateEntry *) instrtape->current) + c;
+}
+
+/**
+ * Finish the current FST vertex
+ */
+void fse_finish(InstructionTape *instrtape) {
+  instrtape->current += sizeof(FstStateEntry) * 256;
+}
+
+/**
+ * Free resources in instrbuff
+ */
+void instruction_tape_destroy(InstructionTape *instrbuff) {
+  free(instrbuff->beginning);
+}
+
 /*
  * And now one where the path taken changes which capture is made
  * A <- aa
@@ -359,116 +455,75 @@ void create_pegreg_abk(unsigned char *outbuff) {
  * 5 -?:0-> 6
  * 6 -?:0-> 6
  */
-void create_pegreg_diffmatch(unsigned char *outbuff) {
-  for (int i = 0; i < 256; i++) {
-    FstStateEntry fse;
-    if (i == 'a') {
-      fse.components.flags = 0;
-      fse.components.flags |= FST_FLAG_VALID;
-      fse.components.flags |= FST_FLAG_INITIAL;
-      fse.components.out_state = 1;
-      fse.components.outchar = 'a';
-    } else {
-      fse.components.flags = 0;
-      fse.components.flags |= FST_FLAG_VALID;
-      fse.components.flags |= FST_FLAG_INITIAL;
-      fse.components.out_state = 6;
-      fse.components.outchar = 0;
+void create_pegreg_diffmatch(InstructionTape *instrtape) {
+  /* State 0 */
+  {
+    fse_clear_instr(instrtape, 6);
+    fse_set_initial_flags(instrtape);
+    {
+      FstStateEntry *fse = fse_get_outgoing(instrtape, 'a');
+      fse_set_outstate(fse, 1);
+      fse_set_outchar(fse, 'a');
     }
-
-    *((FstStateEntry *) outbuff) = fse;
-    outbuff += sizeof(FstStateEntry);
+    fse_finish(instrtape);
   }
 
-  for (int i = 0; i < 256; i++) {
-    FstStateEntry fse;
-    if (i == 'a') {
-      fse.components.flags = 0;
-      fse.components.flags |= FST_FLAG_VALID;
-      fse.components.out_state = 2;
-      fse.components.outchar = 'a';
-    } else if (i == 'b') {
-      fse.components.flags = 0;
-      fse.components.flags |= FST_FLAG_VALID;
-      fse.components.out_state = 4;
-      fse.components.outchar = 'b';
-    } else {
-      fse.components.flags = 0;
-      fse.components.flags |= FST_FLAG_VALID;
-      fse.components.out_state = 6;
-      fse.components.outchar = 0;
+  /* State 1 */
+  {
+    fse_clear_instr(instrtape, 6);
+    {
+      FstStateEntry *fse = fse_get_outgoing(instrtape, 'a');
+      fse_set_outstate(fse, 2);
+      fse_set_outchar(fse, 'a');
     }
-
-    *((FstStateEntry *) outbuff) = fse;
-    outbuff += sizeof(FstStateEntry);
-  }
-
-  for (int i = 0; i < 256; i++) {
-    FstStateEntry fse;
-    if (i == 'x') {
-      fse.components.flags = 0;
-      fse.components.flags |= FST_FLAG_VALID;
-      fse.components.out_state = 3;
-      fse.components.outchar = 'x';
-    } else {
-      fse.components.flags = 0;
-      fse.components.flags |= FST_FLAG_VALID;
-      fse.components.out_state = 6;
-      fse.components.outchar = 0;
+    {
+      FstStateEntry *fse = fse_get_outgoing(instrtape, 'b');
+      fse_set_outstate(fse, 4);
+      fse_set_outchar(fse, 'b');
     }
-
-    *((FstStateEntry *) outbuff) = fse;
-    outbuff += sizeof(FstStateEntry);
+    fse_finish(instrtape);
   }
 
-  for (int i = 0; i < 256; i++) {
-    FstStateEntry fse;
-    fse.components.flags = 0;
-    fse.components.flags |= FST_FLAG_VALID;
-    fse.components.flags |= FST_FLAG_FINAL;
-    fse.components.out_state = 6;
-    fse.components.outchar = 0;
-    *((FstStateEntry *) outbuff) = fse;
-    outbuff += sizeof(FstStateEntry);
-  }
-
-  for (int i = 0; i < 256; i++) {
-    FstStateEntry fse;
-    if (i == 'x') {
-      fse.components.flags = 0;
-      fse.components.flags |= FST_FLAG_VALID;
-      fse.components.out_state = 5;
-      fse.components.outchar = 'x';
-    } else {
-      fse.components.flags = 0;
-      fse.components.flags |= FST_FLAG_VALID;
-      fse.components.out_state = 6;
-      fse.components.outchar = 0;
+  /* State 2 */
+  {
+    fse_clear_instr(instrtape, 6);
+    {
+      FstStateEntry *fse = fse_get_outgoing(instrtape, 'x');
+      fse_set_outstate(fse, 3);
+      fse_set_outchar(fse, 'x');
     }
-
-    *((FstStateEntry *) outbuff) = fse;
-    outbuff += sizeof(FstStateEntry);
+    fse_finish(instrtape);
   }
 
-  for (int i = 0; i < 256; i++) {
-    FstStateEntry fse;
-    fse.components.flags = 0;
-    fse.components.flags |= FST_FLAG_VALID;
-    fse.components.flags |= FST_FLAG_FINAL;
-    fse.components.out_state = 6;
-    fse.components.outchar = 0;
-    *((FstStateEntry *) outbuff) = fse;
-    outbuff += sizeof(FstStateEntry);
+  /* State 3 */
+  {
+    fse_clear_instr(instrtape, 6);
+    fse_set_final_flags(instrtape);
+    fse_finish(instrtape);
   }
 
-  for (int i = 0; i < 256; i++) {
-    FstStateEntry fse;
-    fse.components.flags = 0;
-    fse.components.flags |= FST_FLAG_VALID;
-    fse.components.out_state = 6;
-    fse.components.outchar = 0;
-    *((FstStateEntry *) outbuff) = fse;
-    outbuff += sizeof(FstStateEntry);
+  /* State 4 */
+  {
+    fse_clear_instr(instrtape, 6);
+    {
+      FstStateEntry *fse = fse_get_outgoing(instrtape, 'x');
+      fse_set_outstate(fse, 5);
+      fse_set_outchar(fse, 'x');
+    }
+    fse_finish(instrtape);
+  }
+
+  /* State 5 */
+  {
+    fse_clear_instr(instrtape, 6);
+    fse_set_final_flags(instrtape);
+    fse_finish(instrtape);
+  }
+
+  /* State 6 */
+  {
+    fse_clear_instr(instrtape, 6);
+    fse_finish(instrtape);
   }
 }
 
@@ -550,198 +605,4 @@ char *match_string(char *input, unsigned char *instrbuff, int *match_success,
 
   *match_success = !!(current_state_start->components.flags & FST_FLAG_FINAL);
   return retval;
-}
-
-/**
- * The starting point of the program
- * @param argc the number of arguments
- * @param argv the argument array
- */
-int main(int argc, char **argv) {
-
-  /* Success cases */
-
-  {
-    printf("Testing: FST a:a\n");
-    unsigned char *instrbuff = malloc(3 * 256 * sizeof(FstStateEntry));
-    create_a_to_a(instrbuff);
-
-    unsigned short *matched_states;
-    int match_success = 0;
-    char *outstr =
-        match_string("a", instrbuff, &match_success, &matched_states);
-
-    printf("outstr is: \"%s\"\n", outstr);
-    printf("Match success is: %d\n", match_success);
-
-    char *outstrcurr = outstr;
-    int i = 0;
-    while (*outstrcurr) {
-      printf("\"%c\" matched with state %d\n", *outstrcurr, matched_states[i]);
-      i += 1;
-      outstrcurr += 1;
-    }
-
-    free(outstr);
-    free(matched_states);
-    free(instrbuff);
-    printf("Done.\n");
-  }
-
-  {
-    printf("Testing: PEGREG (B/A)K against \"aab\"\n");
-    unsigned char *instrbuff = malloc(5 * 256 * sizeof(FstStateEntry));
-    create_pegreg_bak(instrbuff);
-    unsigned short *matched_states;
-    int match_success = 0;
-    char *outstr =
-        match_string("aab", instrbuff, &match_success, &matched_states);
-
-    printf("outstr is: \"%s\"\n", outstr);
-    printf("Match success is: %d\n", match_success);
-
-    char *outstrcurr = outstr;
-    int i = 0;
-    while (*outstrcurr) {
-      printf("\"%c\" matched with state %d\n", *outstrcurr, matched_states[i]);
-      i += 1;
-      outstrcurr += 1;
-    }
-
-    free(outstr);
-    free(matched_states);
-    free(instrbuff);
-    printf("Done.\n");
-  }
-
-  {
-    printf("Testing: PEGREG (A/B)K against \"aaab\"\n");
-    unsigned char *instrbuff = malloc(6 * 256 * sizeof(FstStateEntry));
-    create_pegreg_abk(instrbuff);
-    unsigned short *matched_states;
-    int match_success = 0;
-    char *outstr =
-        match_string("aaab", instrbuff, &match_success, &matched_states);
-
-    printf("outstr is: \"%s\"\n", outstr);
-    printf("Match success is: %d\n", match_success);
-
-    char *outstrcurr = outstr;
-    int i = 0;
-    while (*outstrcurr) {
-      printf("\"%c\" matched with state %d\n", *outstrcurr, matched_states[i]);
-      i += 1;
-      outstrcurr += 1;
-    }
-
-    free(outstr);
-    free(matched_states);
-    free(instrbuff);
-    printf("Done.\n");
-  }
-
-  {
-    printf("Testing: PEGREG (aa/bb)x against \"aax\"\n");
-    unsigned char *instrbuff = malloc(7 * 256 * sizeof(FstStateEntry));
-    create_pegreg_diffmatch(instrbuff);
-    unsigned short *matched_states;
-    int match_success = 0;
-    char *outstr =
-        match_string("aax", instrbuff, &match_success, &matched_states);
-
-    printf("outstr is: \"%s\"\n", outstr);
-    printf("Match success is: %d\n", match_success);
-
-    char *outstrcurr = outstr;
-    int i = 0;
-    while (*outstrcurr) {
-      printf("\"%c\" matched with state %d\n", *outstrcurr, matched_states[i]);
-      i += 1;
-      outstrcurr += 1;
-    }
-
-    free(outstr);
-    free(matched_states);
-    free(instrbuff);
-    printf("Done.\n");
-  }
-
-  /* Failure cases */
-  {
-    printf("Testing: FST a:a against \"ab\"\n");
-    unsigned char *instrbuff = malloc(3 * 256 * sizeof(FstStateEntry));
-    create_a_to_a(instrbuff);
-
-    unsigned short *matched_states;
-    int match_success = 0;
-    char *outstr =
-        match_string("ab", instrbuff, &match_success, &matched_states);
-
-    printf("outstr is: \"%s\"\n", outstr);
-    printf("Match success is: %d\n", match_success);
-
-    char *outstrcurr = outstr;
-    int i = 0;
-    while (*outstrcurr) {
-      printf("\"%c\" matched with state %d\n", *outstrcurr, matched_states[i]);
-      i += 1;
-      outstrcurr += 1;
-    }
-
-    free(outstr);
-    free(matched_states);
-    free(instrbuff);
-    printf("Done.\n");
-  }
-
-  {
-    printf("Testing: PEGREG (B/A)K against \"aaab\"\n");
-    unsigned char *instrbuff = malloc(5 * 256 * sizeof(FstStateEntry));
-    create_pegreg_bak(instrbuff);
-    unsigned short *matched_states;
-    int match_success = 0;
-    char *outstr =
-        match_string("aaab", instrbuff, &match_success, &matched_states);
-
-    printf("outstr is: \"%s\"\n", outstr);
-    printf("Match success is: %d\n", match_success);
-
-    char *outstrcurr = outstr;
-    int i = 0;
-    while (*outstrcurr) {
-      printf("\"%c\" matched with state %d\n", *outstrcurr, matched_states[i]);
-      i += 1;
-      outstrcurr += 1;
-    }
-
-    free(outstr);
-    free(matched_states);
-    free(instrbuff);
-    printf("Done.\n");
-  }
-
-  {
-    printf("Testing: PEGREG (A/B)K against \"aab\"\n");
-    unsigned char *instrbuff = malloc(6 * 256 * sizeof(FstStateEntry));
-    create_pegreg_abk(instrbuff);
-    unsigned short *matched_states;
-    int match_success = 0;
-    char *outstr =
-        match_string("aab", instrbuff, &match_success, &matched_states);
-
-    printf("outstr is: \"%s\"\n", outstr);
-    printf("Match success is: %d\n", match_success);
-
-    char *outstrcurr = outstr;
-    int i = 0;
-    while (*outstrcurr) {
-      printf("\"%c\" matched with state %d\n", *outstrcurr, matched_states[i]);
-      i += 1;
-      outstrcurr += 1;
-    }
-
-    free(outstr);
-    free(matched_states);
-    free(instrbuff);
-  }
 }
