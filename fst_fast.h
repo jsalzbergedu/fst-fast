@@ -56,7 +56,7 @@ void match_one_char(char input, char *output, int *state_number,
                     FstStateEntry *states, FstStateEntry *current_state_start,
                     FstStateEntry **next_state);
 
-char *match_string(char *input, unsigned char *instrbuff, int *match_success,
-                   unsigned short **matched_states);
+char *match_string(const char *input, InstructionTape *instrtape,
+                   int *match_success, unsigned short **matched_states);
 
 #endif /* FST_FAST_H */

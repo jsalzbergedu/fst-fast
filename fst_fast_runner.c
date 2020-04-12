@@ -99,8 +99,8 @@ int main(int argc, char **argv) {
     create_pegreg_diffmatch(&instrtape);
     unsigned short *matched_states;
     int match_success = 0;
-    char *outstr = match_string("aax", instrtape.beginning, &match_success,
-                                &matched_states);
+    char *outstr =
+        match_string("aax", &instrtape, &match_success, &matched_states);
 
     printf("outstr is: \"%s\"\n", outstr);
     printf("Match success is: %d\n", match_success);

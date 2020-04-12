@@ -4,6 +4,9 @@
  * @file fst_fast.c
  */
 #include <fst_fast.h>
+#include <lauxlib.h>
+#include <lua.h>
+#include <lualib.h>
 #include <memory.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -552,9 +555,10 @@ void match_one_char(char input, char *output, int *state_number,
  * array of shorts corresponding to what
  * was matched by what state.
  */
-char *match_string(char *input, unsigned char *instrbuff, int *match_success,
-                   unsigned short **matched_states) {
+char *match_string(const char *input, InstructionTape *instrtape,
+                   int *match_success, unsigned short **matched_states) {
   /* Output vector */
+  unsigned char *instrbuff = instrtape->beginning;
   char *retval = malloc(sizeof(char) * 10);
   char *string_end = retval;
   int retval_size = 0;
@@ -605,4 +609,70 @@ char *match_string(char *input, unsigned char *instrbuff, int *match_success,
 
   *match_success = !!(current_state_start->components.flags & FST_FLAG_FINAL);
   return retval;
+}
+
+static int c_swap(lua_State *L) {
+  double arg1 = luaL_checknumber(L, 1);
+  double arg2 = luaL_checknumber(L, 2);
+  lua_pushnumber(L, arg2);
+  lua_pushnumber(L, arg1);
+  return 2;
+}
+
+static int l_get_instruction_tape(lua_State *L) {
+  InstructionTape *it = malloc(sizeof(InstructionTape));
+  fse_initialize_tape(it);
+  lua_pushlightuserdata(L, (void *) it);
+  return 1;
+}
+
+static int l_create_pegreg_diffmatch(lua_State *L) {
+  InstructionTape *it = (InstructionTape *) lua_touserdata(L, 1);
+  create_pegreg_diffmatch(it);
+  return 0;
+}
+
+static int l_match_string(lua_State *L) {
+  const char *input = luaL_checkstring(L, 1);
+  InstructionTape *it = (InstructionTape *) lua_touserdata(L, 2);
+
+  int match_success;
+  unsigned short *matched_states;
+  char *outstr = match_string(input, it, &match_success, &matched_states);
+
+  lua_pushstring(L, outstr);
+
+  lua_pushboolean(L, match_success);
+
+  lua_newtable(L);
+  int counter = 1;
+  while (*outstr) {
+    lua_pushnumber(L, counter);
+    lua_pushnumber(L, matched_states[counter - 1]);
+    lua_settable(L, -3);
+    counter += 1;
+    outstr += 1;
+  }
+
+  return 3;
+}
+
+static int l_instruction_tape_destroy(lua_State *L) {
+  InstructionTape *it = (InstructionTape *) lua_touserdata(L, 1);
+  instruction_tape_destroy(it);
+  free(it);
+  return 0;
+}
+
+static const struct luaL_Reg fst_fast[] = {
+    {"c_swap", c_swap},
+    {"get_instruction_tape", l_get_instruction_tape},
+    {"create_pegreg_diffmatch", l_create_pegreg_diffmatch},
+    {"match_string", l_match_string},
+    {"instruction_tape_destroy", l_instruction_tape_destroy},
+    {NULL, NULL}};
+
+int luaopen_fst_fast(lua_State *L) {
+  luaL_newlib(L, fst_fast);
+  return 1;
 }
