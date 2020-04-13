@@ -72,7 +72,6 @@ do
    fst_fast.fse_finish(instrtape)
 end
 
-
 -- State 4
 do
    fst_fast.fse_clear_instr(instrtape, 6)

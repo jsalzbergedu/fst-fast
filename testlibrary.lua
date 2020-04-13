@@ -21,7 +21,6 @@ do
    print("it.__it is: ", it.__it)
    local ins = it:instr(6)
    print("haha")
-   ins:initial()
    -- ins:set_initial_flags()
    -- do
    --    local fse = ins:get_outgoing('a')

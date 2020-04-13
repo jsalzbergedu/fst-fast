@@ -331,7 +331,7 @@ void create_pegreg_abk(unsigned char *outbuff) {
 }
 
 void fse_clear_flag(FstStateEntry *fse) {
-  fse->components.flags = 0;
+  fse->components.flags = (char) 0;
 }
 
 void fse_set_initial_flag(FstStateEntry *fse) {
@@ -359,7 +359,9 @@ void fse_set_initial_flags(InstructionTape *instrtape) {
 }
 
 void fse_set_outchar(FstStateEntry *fse, char a) {
-  fse->components.outchar = a;
+  FstStateEntry copy = *fse;
+  copy.components.outchar = a;
+  *fse = copy;
 }
 
 void fse_set_outstate(FstStateEntry *fse, unsigned short outstate) {
@@ -371,15 +373,14 @@ void fse_set_outstate(FstStateEntry *fse, unsigned short outstate) {
  */
 void fse_initialize_tape(InstructionTape *instrtape) {
   instrtape->capacity = 10;
-  instrtape->beginning =
-      (unsigned char *) malloc(10 * sizeof(FstStateEntry) * 256);
+  instrtape->beginning = (unsigned char *) malloc(instrtape->capacity *
+                                                  sizeof(FstStateEntry) * 256);
   if (!(instrtape->beginning)) {
     perror("Memory allocation failure");
     exit(1);
   }
   instrtape->current = instrtape->beginning;
   instrtape->length = 0;
-  instrtape->capacity = 0;
 }
 
 /**
@@ -402,13 +403,10 @@ void fse_grow(InstructionTape *instrtape, int targetlen) {
  * Clear an entire instruction
  */
 void fse_clear_instr(InstructionTape *instrtape, unsigned short errorstate) {
-  printf("Hello from c\n");
   fse_grow(instrtape, instrtape->length + 1);
-  printf("grown\n");
   instrtape->length += 1;
 
   FstStateEntry *fse = (FstStateEntry *) instrtape->current;
-  printf("Nabbed current\n");
   for (int i = 0; i < 256; i++) {
     fse_clear_flag(fse);
     fse_set_valid_flag(fse);
@@ -416,7 +414,6 @@ void fse_clear_instr(InstructionTape *instrtape, unsigned short errorstate) {
     fse_set_outstate(fse, errorstate);
     fse += 1;
   }
-  printf("Fse's cleared \n");
 }
 
 /**
@@ -672,7 +669,6 @@ static int l_instruction_tape_destroy(lua_State *L) {
 
 static int l_fse_clear_instr(lua_State *L) {
   InstructionTape *it = (InstructionTape *) lua_touserdata(L, 1);
-  printf("instruction tape is: %p\n", it);
   int error_state = luaL_checkint(L, 2);
   fse_clear_instr(it, error_state);
   return 0;
@@ -716,7 +712,6 @@ static int l_fse_set_outchar(lua_State *L) {
 
 static int l_fse_finish(lua_State *L) {
   InstructionTape *it = (InstructionTape *) lua_touserdata(L, 1);
-  printf("Finishing goddamnit %p\n", it);
   fse_finish(it);
   return 0;
 }

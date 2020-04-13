@@ -3,6 +3,8 @@ local c_lib = require("fst_fast")
 
 fst_fast.instruction_tape = {}
 
+runtimes = 0
+
 --------------------------------------------------------------------------------
 -- Create an instruction tape.
 -- This is the "low level" functionality that
@@ -98,8 +100,10 @@ function fst_fast.instruction_tape.open()
          return outgoing
       end
 
-      assert(tape.__it_isvalid, "Instruction tape already closed")
+      print("ins is: ", ins)
+      assert(tape.__it_isvalid, "Instruction tape invalidated")
       c_lib.fse_clear_instr(tape.__it, num)
+      print("Hello!")
       return ins
    end
 

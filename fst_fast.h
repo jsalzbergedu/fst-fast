@@ -5,13 +5,14 @@
 
 typedef union FstStateEntry FstStateEntry;
 
-union FstStateEntry {
-  struct FstStateEntryComponents {
-    char flags;
-    char outchar;
-    unsigned short out_state;
-  } components;
+struct FstStateEntryComponents {
+  char flags;
+  char outchar;
+  unsigned short out_state;
+};
 
+union FstStateEntry {
+  struct FstStateEntryComponents components;
   int entry;
 };
 
