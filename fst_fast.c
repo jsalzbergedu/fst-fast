@@ -589,6 +589,10 @@ char *match_string(const char *input, InstructionTape *instrtape,
           exit(1);
         }
         matched_states = realloc(matched_states, retval_capacity);
+        if (!matched_states) {
+          perror("Failed to allocate memory");
+          exit(1);
+        }
       }
       *string_end = output;
       string_end += 1;

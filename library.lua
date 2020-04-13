@@ -34,13 +34,11 @@ function fst_fast.instruction_tape.open()
    -----------------------------------------------------------------------------
    function tape:instr(num)
       local ins = {}
-      print("ins is: ", ins)
       --------------------------------------------------------------------------
       -- Whether or not the instruction is valid
       --------------------------------------------------------------------------
       ins.__in_isvalid = true
 
-      print("ins is: ", ins)
       --------------------------------------------------------------------------
       -- A method that sets the state's flags to initial
       --------------------------------------------------------------------------
@@ -49,7 +47,6 @@ function fst_fast.instruction_tape.open()
          c_lib.fse_set_initial_flags(tape.__it)
       end
 
-      print("ins is: ", ins)
       --------------------------------------------------------------------------
       -- A function that sets the final flags
       --------------------------------------------------------------------------
@@ -59,7 +56,6 @@ function fst_fast.instruction_tape.open()
          c_lib.fse_set_final_flags(tape.__it)
       end
 
-      print("ins is: ", ins)
       --------------------------------------------------------------------------
       -- A method that finishes an instruction and advances the tape
       --------------------------------------------------------------------------
@@ -69,7 +65,6 @@ function fst_fast.instruction_tape.open()
          self.__in_isvalid = false;
       end
 
-      print("ins is: ", ins)
       --------------------------------------------------------------------------
       -- A method that gets the outgoing instruction.
       -- The letter that this method takes is the
@@ -100,11 +95,13 @@ function fst_fast.instruction_tape.open()
          return outgoing
       end
 
-      print("ins is: ", ins)
       assert(tape.__it_isvalid, "Instruction tape invalidated")
       c_lib.fse_clear_instr(tape.__it, num)
-      print("Hello!")
       return ins
+   end
+
+   function tape:match_string(str)
+      return c_lib.match_string(str, self.__it)
    end
 
    return tape

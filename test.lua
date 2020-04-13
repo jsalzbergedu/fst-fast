@@ -98,8 +98,7 @@ do
    fst_fast.fse_finish(instrtape)
 end
 
-fst_fast.create_pegreg_diffmatch(instrtape)
-
+print("got to right before match string")
 outstr, match_success, matched_states = fst_fast.match_string("aax", instrtape)
 
 print("Outstr is: ", outstr)
