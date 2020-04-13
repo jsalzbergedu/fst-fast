@@ -36,13 +36,13 @@ void fse_set_initial_flags(InstructionTape *instrtape);
 
 void fse_set_outchar(FstStateEntry *fse, char a);
 
-void fse_set_outstate(FstStateEntry *fse, int outstate);
+void fse_set_outstate(FstStateEntry *fse, unsigned short outstate);
 
 void fse_initialize_tape(InstructionTape *instrtape);
 
 void fse_grow(InstructionTape *instrtape, int targetlen);
 
-void fse_clear_instr(InstructionTape *instrtape, int errorstate);
+void fse_clear_instr(InstructionTape *instrtape, unsigned short errorstate);
 
 FstStateEntry *fse_get_outgoing(InstructionTape *instrtape, char c);
 
