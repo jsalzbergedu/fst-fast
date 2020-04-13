@@ -3,6 +3,7 @@
  * @author Jacob Salzberg (jssalzbe)
  * @file fst_fast.c
  */
+#include <assert.h>
 #include <fst_fast.h>
 #include <lauxlib.h>
 #include <lua.h>
@@ -664,12 +665,74 @@ static int l_instruction_tape_destroy(lua_State *L) {
   return 0;
 }
 
+static int l_fse_clear_instr(lua_State *L) {
+  InstructionTape *it = (InstructionTape *) lua_touserdata(L, 1);
+  int error_state = luaL_checkint(L, 2);
+  fse_clear_instr(it, error_state);
+  return 0;
+}
+
+static int l_fse_set_initial_flags(lua_State *L) {
+  InstructionTape *it = (InstructionTape *) lua_touserdata(L, 1);
+  fse_set_initial_flags(it);
+  return 0;
+}
+
+static int l_fse_get_outgoing(lua_State *L) {
+  InstructionTape *it = (InstructionTape *) lua_touserdata(L, 1);
+  const char *c = luaL_checkstring(L, 2);
+  if (strlen(c) != 1) {
+    luaL_error(L, "Size of c parameter must be 1");
+    return 0;
+  }
+  FstStateEntry *fse = fse_get_outgoing(it, *c);
+  lua_pushlightuserdata(L, (void *) fse);
+  return 1;
+}
+
+static int l_fse_set_outstate(lua_State *L) {
+  FstStateEntry *fse = (FstStateEntry *) lua_touserdata(L, 1);
+  int outstate = luaL_checkint(L, 2);
+  fse_set_outstate(fse, outstate);
+  return 0;
+}
+
+static int l_fse_set_outchar(lua_State *L) {
+  FstStateEntry *fse = (FstStateEntry *) lua_touserdata(L, 1);
+  const char *c = luaL_checkstring(L, 2);
+  if (strlen(c) != 1) {
+    luaL_error(L, "Size of c parameter must be 1");
+    return 0;
+  }
+  fse_set_outchar(fse, *c);
+  return 0;
+}
+
+static int l_fse_finish(lua_State *L) {
+  InstructionTape *it = (InstructionTape *) lua_touserdata(L, 1);
+  fse_finish(it);
+  return 0;
+}
+
+static int l_fse_set_final_flags(lua_State *L) {
+  InstructionTape *it = (InstructionTape *) lua_touserdata(L, 1);
+  fse_set_final_flags(it);
+  return 0;
+}
+
 static const struct luaL_Reg fst_fast[] = {
     {"c_swap", c_swap},
     {"get_instruction_tape", l_get_instruction_tape},
     {"create_pegreg_diffmatch", l_create_pegreg_diffmatch},
     {"match_string", l_match_string},
     {"instruction_tape_destroy", l_instruction_tape_destroy},
+    {"fse_clear_instr", l_fse_clear_instr},
+    {"fse_set_initial_flags", l_fse_set_initial_flags},
+    {"fse_get_outgoing", l_fse_get_outgoing},
+    {"fse_set_outstate", l_fse_set_outstate},
+    {"fse_set_outchar", l_fse_set_outchar},
+    {"fse_finish", l_fse_finish},
+    {"fse_set_final_flags", l_fse_set_final_flags},
     {NULL, NULL}};
 
 int luaopen_fst_fast(lua_State *L) {
