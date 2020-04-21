@@ -85,4 +85,7 @@ for i = 1, #outstr do
    print("The char ", the_char, " matched with the state ", the_state)
 end
 
+-- Develop from here on out in Lua
+-- OR build up C to lua interface
+
 it:close()
