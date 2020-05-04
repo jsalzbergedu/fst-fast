@@ -5,6 +5,11 @@ fst_fast.instruction_tape = {}
 
 runtimes = 0
 
+-- FUTURE: Implement kleene star,
+--         test regexes
+--         Then add cont-pass layer and possessive ordered
+--         choice, possesive star as layers
+
 --------------------------------------------------------------------------------
 -- Create an instruction tape.
 -- This is the "low level" functionality that
@@ -100,6 +105,9 @@ function fst_fast.instruction_tape.open()
       return ins
    end
 
+   ------------------------------------------------------------------------------
+   -- Match a string against the tape
+   ------------------------------------------------------------------------------
    function tape:match_string(str)
       return c_lib.match_string(str, self.__it)
    end
@@ -228,7 +236,22 @@ syntax.kinds.ref = kindn
 kindn = kindn + 1
 syntax.kinds.grammar = kindn
 kindn = kindn + 1
-syntax.kinds.create = kindn
+syntax.kinds.star = kindn
+
+--------------------------------------------------------------------------------
+-- A method to assert that the interpreter can interpret
+-- the PEGREG dsl in its entirety
+--------------------------------------------------------------------------------
+local function assert_pegreg_interpreter(interpreter)
+   assert(type(interpreter.e) == "function")
+   assert(type(interpreter.lit) == "function")
+   assert(type(interpreter.seq) == "function")
+   assert(type(interpreter.choice) == "function")
+   assert(type(interpreter.grammar) == "function")
+   assert(type(interpreter.ref) == "function")
+   assert(type(interpreter.create) == "function")
+   assert(type(interpreter.star) == "function")
+end
 
 local print_interpreter = {}
 
@@ -259,6 +282,11 @@ end
 
 function print_interpreter.ref(rule, rules)
    local out = string.format("(ref %s)", rule)
+   return out
+end
+
+function print_interpreter.star(item)
+   local out = string.format("(star %s)", rule)
    return out
 end
 
@@ -296,6 +324,9 @@ l:rule('A'):is(l:lit('aa'))
  :create()
 end
 
+assert_pegreg_interpreter(print_interpreter)
+
+
 -- Current language:
 -- (create (rules (rule K (lit x))
 --                (rule B (lit bb)))
@@ -327,6 +358,123 @@ end
 --                               (seq (lit b) (lit b)))
 --                       (fin (lit x)))))
 --
+-- Also, translate (seq (choice A B) K)
+-- to (choice (seq A K) (seq B K)).
+-- this will remove any cases where a pair
+-- of arrows would have reconverged on a state,
+-- allowing for reconversion.
+--
+-- To optimize, this could be done
+-- before and after enumeration,
+-- and the transform could be changed to simply reference K.
+
+--------------------------------------------------------------------------------
+-- Transform all sequences of the form
+-- seq(choice(A, B), K)
+-- to the form
+-- choice(seq(A, K), seq(B, K))
+--------------------------------------------------------------------------------
+local sc_to_cs = {}
+
+function sc_to_cs.create(interpreter)
+   local sc_to_cs = {}
+   function sc_to_cs.e()
+      return {
+         kind = syntax.kinds.e
+      }
+   end
+
+   function sc_to_cs.seq(rule1, rule2)
+      return {
+         kind = syntax.kinds.seq,
+         rule1 = rule1,
+         rule2 = rule2
+      }
+   end
+
+   function sc_to_cs.lit(lit)
+      return {
+         kind = syntax.kinds.lit,
+         data = lit
+      }
+   end
+
+   function sc_to_cs.choice(rule1, rule2)
+      return {
+         kind = syntax.kinds.choice,
+         rule1 = rule1,
+         rule2 = rule2
+      }
+   end
+
+   function sc_to_cs.star(item)
+      return {
+         kind = syntax.kinds.star,
+         data = item
+      }
+   end
+
+   function sc_to_cs.ref(rule, rules)
+      return {
+         kind = syntax.kinds.ref,
+         rule = rule,
+         rules = rules
+      }
+   end
+
+   local function rebuild(rule)
+      if rule.kind == syntax.kinds.lit then
+         return interpreter.lit(rule.data)
+      end
+      if rule.kind == syntax.kinds.star then
+         return interpreter.star(rebuild(rule.data))
+      end
+      if rule.kind == syntax.kinds.seq then
+         if rule.rule1.kind == syntax.kinds.choice then
+            return interpreter.choice(interpreter.seq(rebuild(rule.rule1.rule1),
+                                                      rebuild(rule.rule2)),
+                                      interpreter.seq(rebuild(rule.rule1.rule2),
+                                                      rebuild(rule.rule2)))
+         end
+         return interpreter.seq(rebuild(rule.rule1),
+                                rebuild(rule.rule2))
+      end
+      if rule.kind == syntax.kinds.choice then
+         return interpreter.choice(rebuild(rule.rule1),
+                                   rebuild(rule.rule2))
+      end
+      if rule.kind == syntax.kinds.ref then
+         return interpreter.ref(rule.rule, rule.rules)
+      end
+      return interpreter.e()
+   end
+
+   function sc_to_cs.grammar(item)
+      return interpreter.grammar(rebuild(item))
+   end
+
+   function sc_to_cs.create(rules, grammar)
+      return interpreter.create(rules, grammar)
+   end
+
+   return sc_to_cs
+end
+
+----------------------------------------------------------------------------
+-- Test the sc_to_cs interpreter
+---------------------------------------------------------------------------
+print()
+print("Testing the sc_to_cs interpreter")
+do
+local l = l.l(sc_to_cs.create(print_interpreter))
+l:rule('A'):is(l:lit('aa'))
+ :rule('B'):is(l:lit('bb'))
+ :rule('K'):is(l:lit('x'))
+ :grammar(l:seq(l:choice(l:ref('A'), l:ref('B')), l:ref('K')))
+ :create()
+end
+
+assert_pegreg_interpreter(sc_to_cs.create(print_interpreter))
 
 ----------------------------------------------------------------------------
 -- Expand strings into sequences
@@ -382,6 +530,10 @@ function expand_string.create(interpreter)
       return interpreter.create(rules, grammar)
    end
 
+   function expand_string.star(item)
+      return interpreter.star(item)
+   end
+
    return expand_string
 end
 
@@ -399,6 +551,8 @@ l:rule('A'):is(l:lit('aa'))
  :grammar(l:seq(l:choice(l:ref('A'), l:ref('B')), l:ref('K')))
  :create()
 end
+
+assert_pegreg_interpreter(expand_string.create(print_interpreter))
 
 
 ----------------------------------------------------------------------------
@@ -447,9 +601,19 @@ function expand_ref.create(interpreter)
       }
    end
 
+   function expand_ref.star(item)
+      return {
+         kind = syntax.kinds.star,
+         data = item
+      }
+   end
+
    local function rebuild(rule)
       if rule.kind == syntax.kinds.lit then
          return interpreter.lit(rule.data)
+      end
+      if rule.kind == syntax.kinds.star then
+         return interpreter.star(rebuild(rule.data))
       end
       if rule.kind == syntax.kinds.seq then
          return interpreter.seq(rebuild(rule.rule1),
@@ -475,6 +639,10 @@ function expand_ref.create(interpreter)
       return interpreter.create(rules, grammar)
    end
 
+   function expand_ref.star(item)
+      return interpreter.star(item)
+   end
+
    return expand_ref
 end
 
@@ -492,6 +660,8 @@ l:rule('A'):is(l:lit('aa'))
  :grammar(l:seq(l:choice(l:ref('A'), l:ref('B')), l:ref('K')))
  :create()
 end
+
+assert_pegreg_interpreter(expand_ref.create(print_interpreter))
 
 
 ----------------------------------------------------------------------------
@@ -539,19 +709,30 @@ function mark_fin.create(interpreter)
       }
    end
 
+   function mark_fin.star(item)
+      return {
+         kind = syntax.kinds.star,
+         data = item
+      }
+   end
+
    function mark_fin.ref(rule, rules)
       return rules[rule]
    end
 
-   function marklasts_req(item, mark)
+   function marklasts_rec(item, mark)
       if item.kind == syntax.kinds.seq then
-         return interpreter.seq(marklasts_req(item.rule1, false),
-                                marklasts_req(item.rule2, mark))
+         return interpreter.seq(marklasts_rec(item.rule1, false),
+                                marklasts_rec(item.rule2, mark))
       end
 
       if item.kind == syntax.kinds.choice then
-         return interpreter.choice(marklasts_req(item.rule1, mark),
-                                   marklasts_req(item.rule2, mark))
+         return interpreter.choice(marklasts_rec(item.rule1, mark),
+                                   marklasts_rec(item.rule2, mark))
+      end
+
+      if item.kind == syntax.kinds.star then
+         return interpreter.star(marklasts_rec(item.data, mark))
       end
 
       if mark then
@@ -562,7 +743,7 @@ function mark_fin.create(interpreter)
    end
 
    function marklasts(item)
-      return marklasts_req(item, true)
+      return marklasts_rec(item, true)
    end
 
    function mark_fin.grammar(item)
@@ -572,6 +753,7 @@ function mark_fin.create(interpreter)
    function mark_fin.create(rules, grammar)
       return interpreter.create(rules, grammar)
    end
+
 
    return mark_fin
 end
@@ -609,9 +791,30 @@ function fin_print_interpreter.create(rules, grammar)
    return print_interpreter.create(rules, grammar)
 end
 
+function fin_print_interpreter.star(item)
+   return print_interpreter.star(rules, grammar)
+end
+
 function fin_print_interpreter.fin(item)
    local out = string.format("(fin %s)", item)
    return out
+end
+
+
+--------------------------------------------------------------------------------
+-- Assert that the interpreter can interpret
+-- PEGREG extended to include fin
+--------------------------------------------------------------------------------
+local function assert_fin_interpreter(interpreter)
+   assert(type(interpreter.e) == "function")
+   assert(type(interpreter.lit) == "function")
+   assert(type(interpreter.seq) == "function")
+   assert(type(interpreter.choice) == "function")
+   assert(type(interpreter.grammar) == "function")
+   assert(type(interpreter.ref) == "function")
+   assert(type(interpreter.create) == "function")
+   assert(type(interpreter.star) == "function")
+   assert(type(interpreter.fin) == "function")
 end
 
 ----------------------------------------------------------------------------
@@ -636,6 +839,11 @@ do
       :grammar(l:seq(l:choice(l:ref('A'), l:ref('B')), l:ref('A')))
       :create()
 end
+
+assert_fin_interpreter(fin_print_interpreter)
+assert_fin_interpreter(mark_fin.create(fin_print_interpreter))
+
+
 
 -- Now that we have all of the "states" of our nondeterministic FST,
 -- we will want to enumerate them.
@@ -686,8 +894,19 @@ function enumerate.create(interpreter)
       }
    end
 
+   function enumerate.star(item)
+      return {
+         kind = syntax.kinds.star,
+         data = item
+      }
+   end
+
    function enumerate.mark_n(item)
       return interpreter.mark_n(item)
+   end
+
+   function enumerate.ref(item)
+      return interpreter.ref(item)
    end
 
    local function rebuild(item)
@@ -707,6 +926,9 @@ function enumerate.create(interpreter)
          return interpreter.mark_n(interpreter.choice(rebuild(item.rule1),
                                                       rebuild(item.rule2)),
                                    n)
+      end
+      if item.kind == syntax.kinds.star then
+         return interpreter.mark_n(interpreter.star(rebuild(item.data)))
       end
       return interpreter.mark_n(interpreter.e(), n)
    end
@@ -737,6 +959,7 @@ function enumerate.create(interpreter)
    function enumerate.create(rules, grammar)
       return interpreter.create(rules, grammar)
    end
+
 
    return enumerate
 end
@@ -778,9 +1001,30 @@ function n_print_interpreter.fin(item)
    return fin_print_interpreter.fin(item)
 end
 
+function n_print_interpreter.star(item)
+   return fin_print_interpreter.star(item)
+end
+
 function n_print_interpreter.mark_n(item, n)
    local out = string.format("(%d %s)", n, item)
    return out
+end
+
+--------------------------------------------------------------------------------
+-- Assert that the interpreter can interpret
+-- PEGREG extended to include fin and enumeration
+--------------------------------------------------------------------------------
+local function assert_n_interpreter(interpreter)
+   assert(type(interpreter.e) == "function")
+   assert(type(interpreter.lit) == "function")
+   assert(type(interpreter.seq) == "function")
+   assert(type(interpreter.choice) == "function")
+   assert(type(interpreter.grammar) == "function")
+   assert(type(interpreter.ref) == "function")
+   assert(type(interpreter.create) == "function")
+   assert(type(interpreter.star) == "function")
+   assert(type(interpreter.fin) == "function")
+   assert(type(interpreter.mark_n) == "function")
 end
 
 ----------------------------------------------------------------------------
@@ -805,6 +1049,26 @@ do
       :grammar(l:seq(l:choice(l:ref('A'), l:ref('B')), l:ref('A')))
       :create()
 end
+
+assert_n_interpreter(n_print_interpreter)
+assert_n_interpreter(enumerate.create(n_print_interpreter))
+
+--------------------------------------------------------------------------------
+-- Now that we have all of these layers,
+-- we can output states and arrows for _unordered_ choice.
+-- States and arrows are another language; they are made of these elements:
+-- (states N L)
+-- (arrow FROM TO IN OUT)
+-- (create (states N) (arrow FROM TO IN OUT) (arrow ...) ...)
+-- Where N is the number of states,
+-- L is the list of final states,
+-- FROM and TO are the state it comes from and goes to,
+-- and IN and OUT are the input and output characters.
+--------------------------------------------------------------------------------
+-- SL stands for state language.
+local sl = {}
+
+
 
 ----------------------------------------------------------------------------
 -- An interpreter that compiles to a tape
@@ -831,7 +1095,7 @@ local compiler_interpreter = {}
 --    out['kind'] = compiler_syntax.kinds.lit
 --    out['data'] = lit
 --    local litsize = #lit
---    out['states'] = 
+--    out['states'] =
 --    for i in 0, litsize do
 
 --    end

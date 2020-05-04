@@ -118,105 +118,6 @@ void create_a_to_a(unsigned char *outbuff) {
  * A <- aa
  * B <- a
  * K <- ab
- * (B/A)K
- * Translated to the FST:
- * Q (states):
- * 0: {q0, a0, b0}
- * 1: {a1, Fb, Kb0}
- * 2: {Kb1}
- * 3: {FKb}
- * 4: {}
- * Transitions:
- * 0 -a:a-> 1
- * 1 -a:a-> 2
- * 2 -b:b-> 3
- * 3 -?:0-> 4
- * 4 -?:0-> 4
- */
-void create_pegreg_bak(unsigned char *outbuff) {
-  for (int i = 0; i < 256; i++) {
-    FstStateEntry fse;
-    if (i == 'a') {
-      fse.components.flags = 0;
-      fse.components.flags |= FST_FLAG_VALID;
-      fse.components.flags |= FST_FLAG_INITIAL;
-      fse.components.out_state = 1;
-      fse.components.outchar = 'a';
-    } else {
-      fse.components.flags = 0;
-      fse.components.flags |= FST_FLAG_VALID;
-      fse.components.flags |= FST_FLAG_INITIAL;
-      fse.components.out_state = 4;
-      fse.components.outchar = 0;
-    }
-
-    *((FstStateEntry *) outbuff) = fse;
-    outbuff += sizeof(FstStateEntry);
-  }
-
-  for (int i = 0; i < 256; i++) {
-    FstStateEntry fse;
-    if (i == 'a') {
-      fse.components.flags = 0;
-      fse.components.flags |= FST_FLAG_VALID;
-      fse.components.out_state = 2;
-      fse.components.outchar = 'a';
-    } else {
-      fse.components.flags = 0;
-      fse.components.flags |= FST_FLAG_VALID;
-      fse.components.out_state = 4;
-      fse.components.outchar = 0;
-    }
-
-    *((FstStateEntry *) outbuff) = fse;
-    outbuff += sizeof(FstStateEntry);
-  }
-
-  for (int i = 0; i < 256; i++) {
-    FstStateEntry fse;
-    if (i == 'b') {
-      fse.components.flags = 0;
-      fse.components.flags |= FST_FLAG_VALID;
-      fse.components.out_state = 3;
-      fse.components.outchar = 'b';
-    } else {
-      fse.components.flags = 0;
-      fse.components.flags |= FST_FLAG_VALID;
-      fse.components.out_state = 4;
-      fse.components.outchar = 0;
-    }
-
-    *((FstStateEntry *) outbuff) = fse;
-    outbuff += sizeof(FstStateEntry);
-  }
-
-  for (int i = 0; i < 256; i++) {
-    FstStateEntry fse;
-    fse.components.flags = 0;
-    fse.components.flags |= FST_FLAG_VALID;
-    fse.components.flags |= FST_FLAG_FINAL;
-    fse.components.out_state = 4;
-    fse.components.outchar = 0;
-    *((FstStateEntry *) outbuff) = fse;
-    outbuff += sizeof(FstStateEntry);
-  }
-
-  for (int i = 0; i < 256; i++) {
-    FstStateEntry fse;
-    fse.components.flags = 0;
-    fse.components.flags |= FST_FLAG_VALID;
-    fse.components.out_state = 4;
-    fse.components.outchar = 0;
-    *((FstStateEntry *) outbuff) = fse;
-    outbuff += sizeof(FstStateEntry);
-  }
-}
-
-/*
- * Using the PEGREG:
- * A <- aa
- * B <- a
- * K <- ab
  * (A/B)K
  * Translated to the FST:
  * Q (states):
@@ -530,6 +431,91 @@ void create_pegreg_diffmatch(InstructionTape *instrtape) {
   {
     fse_clear_instr(instrtape, 6);
     fse_finish(instrtape);
+  }
+}
+
+/*
+ * Using the PEGREG:
+ * A <- aa
+ * B <- a
+ * K <- ab
+ * (B/A)K
+ * Translated to the FST:
+ * Q (states):
+ * 0: {q0, a0, b0}
+ * 1: {a1, Fb, Kb0}
+ * 2: {Kb1}
+ * 3: {FKb}
+ * 4: {}
+ * Transitions:
+ * 0 -a:a-> 1
+ * 1 -a:a-> 2
+ * 2 -b:b-> 3
+ * 3 -?:0-> 4
+ * 4 -?:0-> 4
+ */
+void create_pegreg_bak(InstructionTape *it) {
+  /* State 0 */
+  {
+    fse_clear_instr(it, 4);
+    fse_set_initial_flags(it);
+    {
+      FstStateEntry *fse = fse_get_outgoing(it, 'a');
+      fse_set_outstate(fse, 1);
+      fse_set_outchar(fse, 'a');
+    }
+    fse_finish(it);
+  }
+
+  /* State 1 */
+  {
+    fse_clear_instr(it, 4);
+    {
+      FstStateEntry *fse = fse_get_outgoing(it, 'a');
+      fse_set_outstate(fse, 2);
+      fse_set_outchar(fse, 'a');
+    }
+    fse_finish(it);
+  }
+
+  /* State 2 */
+  {
+    fse_clear_instr(it, 4);
+    {
+      FstStateEntry *fse = fse_get_outgoing(it, 'b');
+      fse_set_outstate(fse, 3);
+      fse_set_outchar(fse, 'b');
+    }
+    fse_finish(it);
+  }
+
+  /* State 3 */
+  {
+    fse_clear_instr(it, 4);
+    fse_set_final_flags(it);
+    {
+      FstStateEntry *fse = fse_get_outgoing(it, 'b');
+      fse_set_outstate(fse, 4);
+      fse_set_outchar(fse, 'b');
+    }
+    fse_finish(it);
+  }
+
+  /* State 3 */
+  {
+    fse_clear_instr(it, 4);
+    {
+      FstStateEntry *fse = fse_get_outgoing(it, 'a');
+      fse_set_outstate(fse, 3);
+      fse_set_outchar(fse, 'a');
+    }
+    fse_finish(it);
+  }
+
+  /* State 4 */
+  {
+    fse_clear_instr(it, 4);
+    fse_finish(it);
   }
 }
 
