@@ -154,7 +154,7 @@ local l = {}
 --------------------------------------------------------------------------------
 -- A set of methods for creating languages.
 --------------------------------------------------------------------------------
-function l.l(interpreter)
+function l.l()
    local l = {}
    l.rules = {}
    function l:rule(name)
@@ -170,50 +170,62 @@ function l.l(interpreter)
    -- Create a grammar
    ----------------------------------------------------------------------------
    function l:grammar(item)
-      l.grammar = interpreter.grammar(item)
+      self.grammar = function(interpreter)
+         return interpreter.grammar(item(interpreter))
+      end
       return l
    end
 
    ----------------------------------------------------------------------------
    -- Create language out out grammar and rules
    ----------------------------------------------------------------------------
-   function l:create()
-      interpreter.create(l.rules, l.grammar)
+   function l:create(interpreter)
+      return interpreter.create(l.grammar(interpreter))
    end
 
    ----------------------------------------------------------------------------
    -- Literal
    ----------------------------------------------------------------------------
    function l:lit(str)
-      return interpreter.lit(str)
+      return function (interpreter)
+         return interpreter.lit(str)
+      end
    end
 
    ----------------------------------------------------------------------------
    -- Sequence
    ----------------------------------------------------------------------------
    function l:seq(rule1, rule2)
-      return interpreter.seq(rule1, rule2)
+      return function (interpreter)
+         return interpreter.seq(rule1(interpreter), rule2(interpreter))
+      end
    end
 
    ----------------------------------------------------------------------------
    -- A set of methods for creating languages.
    ----------------------------------------------------------------------------
    function l:choice(rule1, rule2)
-      return interpreter.choice(rule1, rule2)
+      return function (interpreter)
+         return interpreter.choice(rule1(interpreter), rule2(interpreter))
+      end
    end
 
    ----------------------------------------------------------------------------
    -- A set of methods for creating languages.
    ----------------------------------------------------------------------------
    function l:ref(rule)
-      return interpreter.ref(rule, l.rules)
+      return function (interpreter)
+         return interpreter.ref(rule, self.rules)
+      end
    end
 
    ----------------------------------------------------------------------------
    -- Empty transition
    ----------------------------------------------------------------------------
    function l:e(rule)
-      return interpreter.e()
+      return function (interpreter)
+         return interpreter.e()
+      end
    end
 
    return l
@@ -312,21 +324,8 @@ function print_interpreter.star(item)
    return out
 end
 
-function print_interpreter.create(rules, grammar)
-   local it, tbl = pairs(rules)
-   local k, v = it(tbl, nil)
-   local rulesstr
-   if tbl ~= nil then
-      rulesstr = string.format("(rule %s %s)", k, v)
-   else
-      rulesstr = ""
-   end
-   k, v = it(tbl, k)
-   while k ~= nil do
-      rulesstr = rulesstr .. string.format(" (rule %s %s)", k, v)
-      k, v = it(tbl, k)
-   end
-   local out = string.format("(create (rules %s) %s)", rulesstr, grammar)
+function print_interpreter.create(grammar)
+   local out = string.format("(create %s)", grammar)
    print(out)
    return out
 end
@@ -338,12 +337,12 @@ end
 print()
 print("Testing the print interpreter")
 do
-local l = l.l(print_interpreter)
+local l = l.l()
 l:rule('A'):is(l:lit('aa'))
  :rule('B'):is(l:lit('bb'))
  :rule('K'):is(l:lit('x'))
  :grammar(l:seq(l:choice(l:ref('A'), l:ref('B')), l:ref('K')))
- :create()
+ :create(print_interpreter)
 end
 
 assert_pegreg_interpreter(print_interpreter)
@@ -392,95 +391,6 @@ assert_pegreg_interpreter(print_interpreter)
 -- and the transform could be changed to simply reference K.
 
 --------------------------------------------------------------------------------
--- An interpreter to help create translations
---------------------------------------------------------------------------------
-local translate = {}
-
-function translate.e()
-   local e = {}
-   e.kind = syntax.kinds.e
-   return e
-end
-
-function translate.seq(rule1, rule2)
-   local seq = {}
-   seq.kind = syntax.kinds.seq
-   seq.children = {rule1, rule2}
-   return seq
-end
-
-function translate.lit(lit)
-   local out = {}
-   out.kind = syntax.kinds.lit
-   out.children = {lit}
-   return out
-end
-
-function translate.choice(rule1, rule2)
-   local choice = {}
-   choice.kind = syntax.kinds.choice
-   choice.children = {rule1, rule2}
-   return choice
-end
-
-function translate.star(item)
-   local star = {}
-   star.kind = syntax.kinds.star
-   star.children = {item}
-   return star
-end
-
-function translate.ref(rule, rules)
-   local ref = {}
-   ref.kind = syntax.kinds.ref
-   ref.children = {rule, rules}
-   return ref
-end
-
-local function translate_default(o, interpreter)
-   local function rebuild(rule)
-      local success, rebuilt = o(rule, rebuild)
-      if success then
-         return rebuilt
-      end
-      if rule.kind == syntax.kinds.lit then
-         return interpreter.lit(rule.children[1])
-      end
-      if rule.kind == syntax.kinds.star then
-         return interpreter.star(rebuild(rule.children[1]))
-      end
-      if rule.kind == syntax.kinds.seq then
-         return interpreter.seq(rebuild(rule.children[1]),
-                                rebuild(rule.children[2]))
-      end
-      if rule.kind == syntax.kinds.choice then
-         return interpreter.choice(rebuild(rule.children[1]),
-                                   rebuild(rule.children[2]))
-      end
-      if rule.kind == syntax.kinds.ref then
-         return interpreter.ref(rule.children[1], rule.children[2])
-      end
-      return interpreter.e()
-   end
-   return rebuild
-end
-
-function translate.grammar(item)
-   function translate_grammar(o, interpreter)
-      return interpreter.grammar(translate_default(o, interpreter)(item))
-   end
-   return translate_grammar
-end
-
-function translate.create(rules, grammar)
-   function translate_create(o, interpreter)
-      return interpreter.create(rules, grammar(o, interpreter))
-   end
-   return translate_create
-end
-
-
---------------------------------------------------------------------------------
 -- Transform all sequences of the form
 -- seq(choice(A, B), K)
 -- to the form
@@ -488,68 +398,69 @@ end
 --------------------------------------------------------------------------------
 local sc_to_cs = {}
 
-function sc_to_cs.create(interpreter)
-   local sc_to_cs = {}
-   function sc_to_cs.e()
-      return translate.e()
+function sc_to_cs.e()
+   return function(f, t, data, interpreter)
+      return f(false, interpreter.e(), nil, nil)
    end
+end
 
-   function sc_to_cs.seq(rule1, rule2)
-      return translate.seq(rule1, rule2)
+function sc_to_cs.lit(lit)
+   return function(interpreter, f, a, b)
+      return f(false, interpreter.lit(lit), nil, nil)
    end
+end
 
-   function sc_to_cs.lit(lit)
-      return translate.lit(lit)
+local function extract(t, data, a, b)
+   return t, data, a, b
+end
+
+function sc_to_cs.choice(rule1, rule2)
+   return function (interpreter, f, a, b)
+      local _, erule1, _, _ = rule1(interpreter, extract, nil, nil)
+      local _, erule2, _, _ = rule2(interpreter, extract, nil, nil)
+      return f(true, interpreter.choice(erule1, erule2), erule1, erule2)
    end
+end
 
-   function sc_to_cs.choice(rule1, rule2)
-      return translate.choice(rule1, rule2)
+function sc_to_cs.star(item)
+   return function (interpreter, f, a, b)
+      local _, item, _, _ = item(interpreter, extract)
+      return f(false, interpreter.star(item), nil, nil)
    end
+end
 
-   function sc_to_cs.star(item)
-      return translate.star(item)
+function sc_to_cs.ref(rule, rules)
+   return function (interpreter, f, a, b)
+      local t, _, a, b = (rules[rule])(interpreter, extract, nil, nil)
+      return f(t, interpreter.ref(rule, rules), a, b)
    end
+end
 
-   function sc_to_cs.ref(rule, rules)
-      return translate.ref(rule, rules)
-   end
-
-   local function rebuild_rec(rule, rebuild)
-      -- seq(choice(A, B), K)
-      -- to the form
-      -- choice(seq(A, K), seq(B, K))
-      -- rebuild two sides first to ensure K in hash table
-
-      if rule.children[1].kind == syntax.kinds.choice then
-         local a = rule.children[1].children[1]
-         local b = rule.children[1].children[2]
-         local k = rule.children[2]
-         return interpreter.choice(interpreter.seq(rebuild(a),
-                                                   rebuild(k)),
-                                   interpreter.seq(rebuild(b),
-                                                   rebuild(k)))
+function sc_to_cs.seq(rule1, rule2)
+   return function (interpreter, f, a, b)
+      local t, left, a, b = rule1(interpreter, extract, nil, nil)
+      local _, k, _, _ = rule2(interpreter, extract, nil, nil)
+      if t then
+         local newleft = interpreter.seq(a, k)
+         local newright = interpreter.seq(b, k)
+         local newout = interpreter.choice(newleft, newright)
+         return f(false, newout, nil, nil)
       end
-      return interpreter.seq(rebuild(rule.children[1]),
-                             rebuild(rule.children[2]))
-
+      return f(false, interpreter.seq(left, k), nil, nil)
    end
+end
 
-   local function rebuild(rule, rebuild)
-      if rule.kind == syntax.kinds.seq then
-         return true, rebuild_rec(rule, rebuild)
-      end
-      return false
+function sc_to_cs.grammar(item)
+   return function (interpreter)
+      local _, item, _, _ = item(interpreter, extract, nil, nil)
+      return interpreter.grammar(item)
    end
+end
 
-   function sc_to_cs.grammar(item)
-      return translate.grammar(item)
+function sc_to_cs.create(grammar)
+   return function (interpreter)
+      return interpreter.create(grammar(interpreter))
    end
-
-   function sc_to_cs.create(rules, grammar)
-      return translate.create(rules, grammar)(rebuild, interpreter)
-   end
-
-   return sc_to_cs
 end
 
 ----------------------------------------------------------------------------
@@ -558,77 +469,92 @@ end
 print()
 print("Testing the sc_to_cs interpreter")
 do
-local l = l.l(sc_to_cs.create(print_interpreter))
-l:rule('A'):is(l:lit('aa'))
- :rule('B'):is(l:lit('bb'))
- :rule('K'):is(l:lit('x'))
- :grammar(l:seq(l:choice(l:ref('A'), l:ref('B')), l:ref('K')))
- :create()
+   local l = l.l()
+   l:rule('A'):is(l:lit('aa'))
+    :rule('B'):is(l:lit('bb'))
+    :rule('K'):is(l:lit('x'))
+    :grammar(l:seq(l:choice(l:ref('A'), l:ref('B')), l:ref('K')))
+    :create(sc_to_cs)(print_interpreter)
 end
 
-assert_pegreg_interpreter(sc_to_cs.create(print_interpreter))
+assert_pegreg_interpreter(sc_to_cs)
+
+
 
 ----------------------------------------------------------------------------
 -- Expand strings into sequences
 ---------------------------------------------------------------------------
 local expand_string = {}
 
-function expand_string.create(interpreter)
-   local expand_string = {}
-   function expand_string.e()
+function expand_string.e()
+   return function (interpreter)
       return interpreter.e()
    end
+end
 
-   function expand_string.seq(rule1, rule2)
-      return interpreter.seq(rule1, rule2)
+function expand_string.seq(rule1, rule2)
+   return function (interpreter)
+      return interpreter.seq(rule1(interpreter),
+                             rule2(interpreter))
    end
+end
 
-   function expand_string_rec(str, c, acc)
-      if str == "" then
-         return expand_string.seq(interpreter.lit(c), acc)
-      end
-      return expand_string_rec(str:sub(1, #str - 1),
-                               str:sub(#str, #str),
-                               expand_string.seq(interpreter.lit(c), acc))
+local function expand_string_rec(interpreter, str, c, acc)
+   if str == "" then
+      return interpreter.seq(interpreter.lit(c), acc)
    end
+   return expand_string_rec(interpreter,
+                            str:sub(1, #str - 1),
+                            str:sub(#str, #str),
+                            interpreter.seq(interpreter.lit(c), acc))
+end
 
-   function expand_string.lit(lit)
+function expand_string.lit(lit)
+   return function (interpreter)
       assert(type(lit) == "string")
       if lit == "" then
-         return expand_string.e()
+         return interpreter.e()
       end
       if #lit == 1 then
          return interpreter.lit(lit)
       end
-      local acc = expand_string.e()
-      return expand_string_rec(lit:sub(1, #lit - 1),
+      local acc = interpreter.e()
+      return expand_string_rec(interpreter,
+                               lit:sub(1, #lit - 1),
                                lit:sub(#lit, #lit),
                                acc)
    end
-
-   function expand_string.choice(rule1, rule2)
-      return interpreter.choice(rule1, rule2)
-   end
-
-   function expand_string.grammar(item)
-      return interpreter.grammar(item)
-   end
-
-   function expand_string.ref(rule, rules)
-      return interpreter.ref(rule, rules)
-   end
-
-   function expand_string.create(rules, grammar)
-      return interpreter.create(rules, grammar)
-   end
-
-   function expand_string.star(item)
-      return interpreter.star(item)
-   end
-
-   return expand_string
 end
 
+function expand_string.choice(rule1, rule2)
+   return function(interpreter)
+      return interpreter.choice(rule1(interpreter), rule2(interpreter))
+   end
+end
+
+function expand_string.grammar(item)
+   return function(interpreter)
+      return interpreter.grammar(item(interpreter))
+   end
+end
+
+function expand_string.ref(rule, rules)
+   return function(interpreter)
+      return interpreter.ref(rule, rules)
+   end
+end
+
+function expand_string.create(grammar)
+   return function(interpreter)
+      return interpreter.create(grammar(interpreter))
+   end
+end
+
+function expand_string.star(item)
+   return function(interpreter)
+      return interpreter.star(item(interpreter))
+   end
+end
 
 ----------------------------------------------------------------------------
 -- Test the expand string interpreter
@@ -636,15 +562,15 @@ end
 print()
 print("Testing the expand string interpreter")
 do
-local l = l.l(expand_string.create(print_interpreter))
+local l = l.l()
 l:rule('A'):is(l:lit('aa'))
  :rule('B'):is(l:lit('bb'))
  :rule('K'):is(l:lit('x'))
  :grammar(l:seq(l:choice(l:ref('A'), l:ref('B')), l:ref('K')))
- :create()
+ :create(expand_string)(print_interpreter)
 end
 
-assert_pegreg_interpreter(expand_string.create(print_interpreter))
+assert_pegreg_interpreter(expand_string)
 
 
 ----------------------------------------------------------------------------
@@ -653,55 +579,51 @@ assert_pegreg_interpreter(expand_string.create(print_interpreter))
 -- ref on the interpreter it is called on.
 ---------------------------------------------------------------------------
 local expand_ref = {}
-
-function expand_ref.create(interpreter)
-   local expand_ref = {}
-   function expand_ref.e()
-      return translate.e()
+function expand_ref.e()
+   return function (i)
+      return i.e()
    end
-
-   function expand_ref.seq(rule1, rule2)
-      return translate.seq(rule1, rule2)
-   end
-
-   function expand_ref.lit(lit)
-      return translate.lit(lit)
-   end
-
-   function expand_ref.choice(rule1, rule2)
-      return translate.choice(rule1, rule2)
-   end
-
-   function expand_ref.ref(rule, rules)
-      return translate.ref(rule, rules)
-   end
-
-   function expand_ref.star(item)
-      return translate.star(item)
-   end
-
-   function expand_ref.star(item)
-      return translate.star(item)
-   end
-
-   local function rebuild(rule, rebuild)
-      if rule.kind == syntax.kinds.ref then
-         return true, rebuild(rule.children[2][rule.children[1]])
-      end
-      return false
-   end
-
-   function expand_ref.grammar(item)
-      return translate.grammar(item)
-   end
-
-   function expand_ref.create(rules, grammar)
-      return translate.create(rules, grammar)(rebuild, interpreter)
-   end
-
-   return expand_ref
 end
 
+function expand_ref.seq(rule1, rule2)
+   return function (i)
+      return i.seq(rule1(i), rule2(i))
+   end
+end
+
+function expand_ref.lit(lit)
+   return function (i)
+      return i.lit(lit)
+   end
+end
+
+function expand_ref.choice(rule1, rule2)
+   return function (i)
+      return i.choice(rule1(i), rule2(i))
+   end
+end
+
+function expand_ref.ref(rule, rules)
+   return rules[rule]
+end
+
+function expand_ref.star(item)
+   return function (i)
+      i.star(item(i))
+   end
+end
+
+function expand_ref.grammar(item)
+   return function (interpreter)
+      return interpreter.grammar(item(interpreter))
+   end
+end
+
+function expand_ref.create(grammar)
+   return function (interpreter)
+      return interpreter.create(grammar(interpreter))
+   end
+end
 
 ----------------------------------------------------------------------------
 -- Test the expand ref interpreter
@@ -709,16 +631,107 @@ end
 print()
 print("Testing the expand ref interpreter")
 do
-local l = l.l(expand_ref.create(expand_string.create(print_interpreter)))
+local l = l.l()
 l:rule('A'):is(l:lit('aa'))
  :rule('B'):is(l:lit('bb'))
  :rule('K'):is(l:lit('x'))
  :grammar(l:seq(l:choice(l:ref('A'), l:ref('B')), l:ref('K')))
- :create()
+ :create(expand_ref)(expand_string)(print_interpreter)
 end
 
-assert_pegreg_interpreter(expand_ref.create(print_interpreter))
+assert_pegreg_interpreter(expand_ref)
 
+
+--------------------------------------------------------------------------------
+-- Add left and right to seq and choice
+--------------------------------------------------------------------------------
+local add_left_right = {}
+
+function add_left_right.e()
+   return function (i)
+      return i.e()
+   end
+end
+
+function add_left_right.lit(lit)
+   return function (i)
+      return i.lit(lit)
+   end
+end
+
+function add_left_right.seq(rule1, rule2)
+   return function (i)
+      return i.seq(i.left(rule1(i)), i.right(rule2(i)))
+   end
+end
+
+function add_left_right.choice(rule1, rule2)
+   return function (i)
+     return i.choice(i.left(rule1(i)), i.right(rule2(i)))
+   end
+end
+
+function add_left_right.grammar(item)
+   return function (i)
+      return i.grammar(item(i))
+   end
+end
+
+function add_left_right.ref(rule, rules)
+   return rules[rule]
+end
+
+function add_left_right.create(grammar)
+   return function (i)
+      return i.create(grammar(i))
+   end
+end
+
+function add_left_right.star(item)
+   return function (i)
+      return i.star(item(i))
+   end
+end
+
+assert_pegreg_interpreter(add_left_right)
+
+local lr_print_interpreter = {}
+for k, v in pairs(print_interpreter) do
+   lr_print_interpreter[k] = v
+end
+
+function lr_print_interpreter.left(item)
+   return string.format("(left %s)", item)
+end
+
+function lr_print_interpreter.right(item)
+   return string.format("(right %s)", item)
+end
+
+--------------------------------------------------------------------------------
+-- Ensures that the interpreter has PEGREG extended with left_right
+--------------------------------------------------------------------------------
+local function assert_leftright_interpreter(interpreter)
+   assert_pegreg_interpreter(interpreter)
+   assert(type(interpreter.left) == "function", "No Left")
+   assert(type(interpreter.right) == "function", "No Right")
+end
+
+----------------------------------------------------------------------------
+-- Test the left right interpreter
+---------------------------------------------------------------------------
+print()
+print("Testing the left right interpreter")
+do
+local l = l.l()
+l:rule('A'):is(l:lit('aa'))
+ :rule('B'):is(l:lit('bb'))
+ :rule('K'):is(l:lit('x'))
+ :grammar(l:seq(l:choice(l:ref('A'), l:ref('B')), l:ref('K')))
+ :create(expand_ref)(expand_string)(add_left_right)(lr_print_interpreter)
+end
+
+assert_leftright_interpreter(lr_print_interpreter)
 
 ----------------------------------------------------------------------------
 -- An interpreter that marks things as final.
@@ -727,89 +740,72 @@ assert_pegreg_interpreter(expand_ref.create(print_interpreter))
 ---------------------------------------------------------------------------
 local mark_fin = {}
 
-function mark_fin.create(interpreter)
-   local mark_fin = {}
-
-   function mark_fin.e()
-      return {
-         kind = syntax.kinds.e,
-         data = interpreter.e()
-      }
-   end
-
-   function mark_fin.lit(lit)
-      return {
-         kind = syntax.kinds.lit,
-         data = interpreter.lit(lit)
-      }
-   end
-
-   function mark_fin.seq(rule1, rule2)
-      return {
-         kind = syntax.kinds.seq,
-         rule1 = rule1,
-         rule2 = rule2,
-      }
-   end
-
-
-   function mark_fin.choice(rule1, rule2)
-      return {
-         kind = syntax.kinds.choice,
-         rule1 = rule1,
-         rule2 = rule2,
-      }
-   end
-
-   function mark_fin.star(item)
-      return {
-         kind = syntax.kinds.star,
-         data = item
-      }
-   end
-
-   function mark_fin.ref(rule, rules)
-      return rules[rule]
-   end
-
-   function marklasts_rec(item, mark)
-      if item.kind == syntax.kinds.seq then
-         local out = interpreter.seq(marklasts_rec(item.rule1, false),
-                                     marklasts_rec(item.rule2, mark))
-         return interpreter.notfin(out)
-      end
-
-      if item.kind == syntax.kinds.choice then
-         local out = interpreter.choice(marklasts_rec(item.rule1, mark),
-                                        marklasts_rec(item.rule2, mark))
-         return interpreter.notfin(out)
-      end
-
-      if item.kind == syntax.kinds.star then
-         local out = interpreter.star(marklasts_rec(item.data, mark))
-         return interpreter.notfin(out)
-      end
-
-      if mark then
-         return interpreter.fin(item.data)
+function mark_fin.e()
+   return function (t, interpreter)
+      if t then
+         return interpreter.fin(interpreter.e())
       else
-         return interpreter.notfin(item.data)
+         return interpreter.notfin(interpreter.e())
       end
    end
+end
 
-   function marklasts(item)
-      return marklasts_rec(item, true)
+function mark_fin.lit(lit)
+   return function (t, interpreter)
+      if t then
+         return interpreter.fin(interpreter.lit(lit))
+      else
+         return interpreter.notfin(interpreter.lit(lit))
+      end
    end
+end
 
-   function mark_fin.grammar(item)
-      return interpreter.grammar(marklasts(item))
+function mark_fin.seq(rule1, rule2)
+   return function (t, interpreter)
+      return interpreter.notfin(interpreter.seq(rule1(false, interpreter),
+                                                rule2(t, interpreter)))
    end
+end
 
-   function mark_fin.create(rules, grammar)
-      return interpreter.create(rules, grammar)
+
+function mark_fin.choice(rule1, rule2)
+   return function (t, interpreter)
+      return interpreter.notfin(interpreter.choice(rule1(t, interpreter), rule2(t, interpreter)))
    end
+end
 
-   return mark_fin
+function mark_fin.star(item)
+   return function (t, interpreter)
+      return interpreter.notfin(interpreter.star(item(t, interpreter)))
+   end
+end
+
+function mark_fin.left(item)
+   return function (t, interpreter)
+      return interpreter.notfin(interpreter.left(item(t, interpreter)))
+   end
+end
+
+function mark_fin.right(item)
+   return function (t, interpreter)
+      return interpreter.notfin(interpreter.right(item(t, interpreter)))
+   end
+end
+
+function mark_fin.ref(rule, rules)
+   assert(false, "Refs should be expanded")
+end
+
+function mark_fin.grammar(item)
+   return function (interpreter)
+      return interpreter.grammar(item(true, interpreter))
+   end
+end
+
+function mark_fin.create(grammar)
+   return function (interpreter)
+      return interpreter.create(grammar(interpreter))
+   end
 end
 
 ----------------------------------------------------------------------------
@@ -817,36 +813,8 @@ end
 ---------------------------------------------------------------------------
 local fin_print_interpreter = {}
 
-function fin_print_interpreter.e()
-   return print_interpreter.e()
-end
-
-function fin_print_interpreter.lit(lit)
-   return print_interpreter.lit(lit)
-end
-
-function fin_print_interpreter.seq(rule1, rule2)
-   return print_interpreter.seq(rule1, rule2)
-end
-
-function fin_print_interpreter.choice(rule1, rule2)
-   return print_interpreter.choice(rule1, rule2)
-end
-
-function fin_print_interpreter.grammar(item)
-   return print_interpreter.grammar(item)
-end
-
-function fin_print_interpreter.ref(rule, rules)
-   assert(false, "Refs ought to be expanded")
-end
-
-function fin_print_interpreter.create(rules, grammar)
-   return print_interpreter.create(rules, grammar)
-end
-
-function fin_print_interpreter.star(item)
-   return print_interpreter.star(rules, grammar)
+for k, v in pairs(lr_print_interpreter) do
+   fin_print_interpreter[k] = v
 end
 
 function fin_print_interpreter.fin(item)
@@ -856,7 +824,8 @@ end
 
 function fin_print_interpreter.notfin(item)
    -- Less cluttered. The information is still there if we need it
-   return item
+   local out = string.format("(notfin %s)", item)
+   return out
 end
 
 --------------------------------------------------------------------------------
@@ -864,7 +833,7 @@ end
 -- PEGREG extended to include fin
 --------------------------------------------------------------------------------
 local function assert_fin_interpreter(interpreter)
-   assert_pegreg_interpreter(interpreter)
+   assert_leftright_interpreter(interpreter)
    assert(type(interpreter.fin) == "function", "No Fin")
    assert(type(interpreter.notfin) == "function", "No Notfin")
 end
@@ -875,25 +844,25 @@ end
 print()
 print("Testing the mark final interpreters")
 do
-   local l = l.l(expand_string.create(expand_ref.create(mark_fin.create(fin_print_interpreter))))
+   local l = l.l()
    l:rule('A'):is(l:lit('aa'))
       :rule('B'):is(l:lit('bb'))
       :rule('K'):is(l:lit('x'))
       :grammar(l:seq(l:choice(l:ref('A'), l:ref('B')), l:ref('K')))
-      :create()
+      :create(expand_ref)(expand_string)(mark_fin)(fin_print_interpreter)
 end
 
 do
-   local l = l.l(expand_string.create(expand_ref.create(mark_fin.create(fin_print_interpreter))))
+   local l = l.l()
    l:rule('A'):is(l:lit('aa'))
       :rule('B'):is(l:lit('bb'))
       :rule('K'):is(l:lit('x'))
       :grammar(l:seq(l:choice(l:ref('A'), l:ref('B')), l:ref('A')))
-      :create()
+      :create(expand_ref)(expand_string)(mark_fin)(fin_print_interpreter)
 end
 
 assert_fin_interpreter(fin_print_interpreter)
-assert_pegreg_interpreter(mark_fin.create(fin_print_interpreter))
+assert_pegreg_interpreter(mark_fin)
 
 
 -- Now that we have all of the "states" of our nondeterministic FST,
@@ -907,125 +876,95 @@ assert_pegreg_interpreter(mark_fin.create(fin_print_interpreter))
 ---------------------------------------------------------------------------
 local enumerate = {}
 
-function enumerate.create(interpreter)
-   local enumerate = {}
-   local finkind = {}
-   local notfinkind = {}
 
-   function enumerate.fin(item)
-      return {
-         kind = finkind,
-         data = item
-      }
+local function extract(item, sum)
+   return item, sum
+end
+
+function enumerate.fin(item)
+   return function (i, n, k)
+      local child, sum_child = item(i, n, extract)
+      return k(i.fin(child), sum_child)
    end
+end
 
-   function enumerate.notfin(item)
-      return {
-         kind = notfinkind,
-         data = item
-      }
+function enumerate.notfin(item)
+   return function (i, n, k)
+      local child, sum_child = item(i, n, extract)
+      return k(i.notfin(child), sum_child)
    end
+end
 
-   function enumerate.e()
-      return {kind = syntax.kinds.e}
+function enumerate.e()
+   return function (i, n, k)
+      return k(i.mark_n(n + 1, i.e()), n + 1)
    end
+end
 
-   function enumerate.seq(rule1, rule2)
-      return {
-         kind = syntax.kinds.seq,
-         rule1 = rule1,
-         rule2 = rule2
-      }
+
+function enumerate.lit(lit)
+   return function (i, n, k)
+      return k(i.mark_n(n + 1, i.lit(lit)), n + 1)
    end
+end
 
-   function enumerate.lit(lit)
-      return {
-         kind = syntax.kinds.lit,
-         data = lit
-      }
+function enumerate.seq(rule1, rule2)
+   return function (i, n, k)
+      local mark_self = n + 1
+      local left, sum_left = rule1(i, n + 1, extract)
+      local right, sum_right = rule2(i, sum_left, extract)
+      return k(i.mark_n(mark_self, i.seq(left, right)), sum_right)
    end
+end
 
-   function enumerate.choice(rule1, rule2)
-      return {
-         kind = syntax.kinds.choice,
-         rule1 = rule1,
-         rule2 = rule2
-      }
+function enumerate.choice(rule1, rule2)
+   return function (i, n, k)
+      local mark_self = n + 1
+      local left, sum_left = rule1(i, n + 1, extract)
+      local right, sum_right = rule2(i, sum_left, extract)
+      return k(i.mark_n(mark_self, i.choice(left, right)), sum_right)
    end
+end
 
-   function enumerate.star(item)
-      return {
-         kind = syntax.kinds.star,
-         data = item
-      }
+function enumerate.star(item)
+   return function (i, n, k)
+      local mark_self = n + 1
+      local child, sum_child = item(i, n + 1, extract)
+      return k(i.mark_n(mark_self, i.star(child)), sum_child)
    end
+end
 
-   function enumerate.mark_n(item)
-      return interpreter.mark_n(item)
+function enumerate.right(item)
+   return function (i, n, k)
+      local mark_self = n + 1
+      local child, sum_child = item(i, n + 1, extract)
+      return k(i.mark_n(mark_self, i.right(child)), sum_child)
    end
+end
 
-   function enumerate.ref(rule, rules)
-      assert(false, "Refs ought to be expanded")
+function enumerate.left(item)
+   return function (i, n, k)
+      local mark_self = n + 1
+      local child, sum_child = item(i, n + 1, extract)
+      return k(i.mark_n(mark_self, i.left(child)), sum_child)
    end
+end
 
-   local function rebuild(item)
-      if item.kind == finkind then
-         return interpreter.fin(rebuild(item.data))
-      end
-      if item.kind == notfinkind then
-         return interpreter.notfin(rebuild(item.data))
-      end
-      local n = item.n
-      if item.kind == syntax.kinds.lit then
-         return interpreter.mark_n(interpreter.lit(item.data), n)
-      end
-      if item.kind == syntax.kinds.seq then
-         return interpreter.mark_n(interpreter.seq(rebuild(item.rule1),
-                                                   rebuild(item.rule2)),
-                                   n)
-      end
-      if item.kind == syntax.kinds.choice then
-         return interpreter.mark_n(interpreter.choice(rebuild(item.rule1),
-                                                      rebuild(item.rule2)),
-                                   n)
-      end
-      if item.kind == syntax.kinds.star then
-         return interpreter.mark_n(interpreter.star(rebuild(item.data)))
-      end
-      return interpreter.mark_n(interpreter.e(), n)
+function enumerate.ref(rule, rules)
+   assert(false, "Refs ought to be expanded")
+end
+
+function enumerate.grammar(item)
+   return function (i)
+      local item, _ = item(i, -1, extract)
+      return i.grammar(item)
    end
+end
 
-   function enumerate.grammar(item)
-      local stack = {[1] = item}
-      local n = 0
-      while #stack > 0 do
-         local top = stack[#stack]
-         stack[#stack] = nil
-         if top.kind == finkind or
-            top.kind == notfinkind
-         then
-            stack[#stack + 1] = top.data
-         else
-            top.n = n
-            n = n + 1
-            if top.kind == syntax.kinds.seq or
-               top.kind == syntax.kinds.choice
-            then
-               stack[#stack + 1] = top.rule2
-               stack[#stack + 1] = top.rule1
-            end
-         end
-      end
-      local rebuilt = rebuild(item);
-      return interpreter.grammar(rebuilt)
+function enumerate.create(grammar)
+   return function (i)
+      return i.create(grammar(i))
    end
-
-   function enumerate.create(rules, grammar)
-      return interpreter.create(rules, grammar)
-   end
-
-
-   return enumerate
 end
 
 ----------------------------------------------------------------------------
@@ -1033,51 +972,14 @@ end
 ---------------------------------------------------------------------------
 local n_print_interpreter = {}
 
-function n_print_interpreter.e()
-   return fin_print_interpreter.e()
+for k, v in pairs(fin_print_interpreter) do
+   n_print_interpreter[k] = v
 end
 
-function n_print_interpreter.lit(lit)
-   return fin_print_interpreter.lit(lit)
-end
-
-function n_print_interpreter.seq(rule1, rule2)
-   return fin_print_interpreter.seq(rule1, rule2)
-end
-
-function n_print_interpreter.choice(rule1, rule2)
-   return fin_print_interpreter.choice(rule1, rule2)
-end
-
-function n_print_interpreter.grammar(item)
-   return fin_print_interpreter.grammar(item)
-end
-
-function n_print_interpreter.ref(rule, rules)
-   return fin_print_interpreter.ref(rule, rules)
-end
-
-function n_print_interpreter.create(rules, grammar)
-   return fin_print_interpreter.create(rules, grammar)
-end
-
-function n_print_interpreter.fin(item)
-   return fin_print_interpreter.fin(item)
-end
-
-function n_print_interpreter.notfin(item)
-   return fin_print_interpreter.notfin(item)
-end
-
-function n_print_interpreter.star(item)
-   return fin_print_interpreter.star(item)
-end
-
-function n_print_interpreter.mark_n(item, n)
+function n_print_interpreter.mark_n(n, item)
    local out = string.format("(# %d %s)", n, item)
    return out
 end
-
 
 --------------------------------------------------------------------------------
 -- Assert that the interpreter can interpret
@@ -1094,25 +996,163 @@ end
 print()
 print("Testing the enumerate interpreters")
 do
-   local l = l.l(expand_string.create(expand_ref.create(mark_fin.create(enumerate.create(n_print_interpreter)))))
+   local l = l.l()
    l:rule('A'):is(l:lit('aa'))
       :rule('B'):is(l:lit('bb'))
       :rule('K'):is(l:lit('x'))
       :grammar(l:seq(l:choice(l:ref('A'), l:ref('B')), l:ref('K')))
-      :create()
+      :create(expand_ref)(expand_string)(mark_fin)(enumerate)(n_print_interpreter)
 end
 
 do
-   local l = l.l(expand_string.create(expand_ref.create(mark_fin.create(enumerate.create(n_print_interpreter)))))
+   local l = l.l()
    l:rule('A'):is(l:lit('aa'))
       :rule('B'):is(l:lit('bb'))
       :rule('K'):is(l:lit('x'))
       :grammar(l:seq(l:choice(l:ref('A'), l:ref('B')), l:ref('A')))
-      :create()
+      :create(expand_ref)(expand_string)(mark_fin)(enumerate)(n_print_interpreter)
 end
 
 assert_n_interpreter(n_print_interpreter)
-assert_n_interpreter(enumerate.create(n_print_interpreter))
+assert_fin_interpreter(enumerate)
+
+--------------------------------------------------------------------------------
+-- An interpreter that returns a list of final states
+--------------------------------------------------------------------------------
+local list_finstates = {}
+print("list_finstates is:", list_finstates)
+
+function list_finstates.e()
+   return function (f)
+      return f({}, false)
+   end
+end
+
+function list_finstates.lit(lit)
+   return function (f)
+      return f({}, false)
+   end
+end
+
+local function extract(lst, t)
+   return lst, t
+end
+
+function list_finstates.seq(rule1, rule2)
+   return function (f)
+      local lst1, _ = rule1(extract)
+      local lst2, _ = rule2(extract)
+      local out = {}
+      for _, v in ipairs(lst1) do
+         table.insert(out, v)
+      end
+      for _, v in ipairs(lst2) do
+         table.insert(out, v)
+      end
+      return f(out, false)
+   end
+end
+
+function list_finstates.choice(rule1, rule2)
+   return list_finstates.seq(rule1, rule2)
+end
+
+function list_finstates.grammar(item)
+   local lst, _ = item(extract)
+   return lst
+end
+
+function list_finstates.ref(rule, rules)
+   assert(false, "Refs should be expanded")
+end
+
+function list_finstates.create(grammar)
+   return grammar
+end
+
+function list_finstates.star(item)
+   return item
+end
+
+function list_finstates.left(item)
+   return item
+end
+
+function list_finstates.right(item)
+   return item
+end
+
+function list_finstates.fin(item)
+   local lst, _ = item(extract)
+   return function (f)
+      return f(lst, true)
+   end
+end
+
+function list_finstates.notfin(item)
+   local lst, _ = item(extract)
+   return function (f)
+      return f(lst, false)
+   end
+end
+
+function list_finstates.mark_n(n, item)
+   return function (f)
+      local lst, t = item(extract)
+      local out = {}
+      for _, v in ipairs(lst) do
+         table.insert(out, v)
+      end
+      if t then
+         table.insert(out, n)
+      end
+      return f(out, false)
+   end
+end
+
+assert_n_interpreter(list_finstates)
+
+--------------------------------------------------------------------------------
+-- An interpreter that remarks final states
+--------------------------------------------------------------------------------
+local remark_fin = {}
+print("remark fin is: ", remark_fin)
+for k, v in pairs(mark_fin) do
+   remark_fin[k] = v
+end
+
+function remark_fin.mark_n(n, item)
+   return function (t, i)
+      return i.mark_n(n, item(t, i))
+   end
+end
+
+function remark_fin.fin(item)
+   return item
+end
+
+function remark_fin.notfin(item)
+   return item
+end
+
+assert_n_interpreter(remark_fin)
+
+--------------------------------------------------------------------------------
+-- Test list finstates
+--------------------------------------------------------------------------------
+do
+   print()
+   print("Testing the list finstates interpreter")
+   local l = l.l()
+   local states = l:rule('A'):is(l:lit('aa'))
+      :rule('B'):is(l:lit('bb'))
+      :rule('K'):is(l:lit('x'))
+      :grammar(l:seq(l:choice(l:ref('A'), l:ref('B')), l:ref('A')))
+      :create(expand_ref)(expand_string)(mark_fin)(enumerate)(list_finstates)
+   for i, v in ipairs(states) do
+      print(i, v)
+   end
+end
 
 --------------------------------------------------------------------------------
 -- Now that we have all of these layers,
@@ -1168,11 +1208,11 @@ end
 -- Assert that the state interpreter has all the functions required
 --------------------------------------------------------------------------------
 local function assert_sl_interpreter(interpreter)
-   assert(type(interpreter.state) == "function")
-   assert(type(interpreter.arrow) == "function")
-   assert(type(interpreter.pair) == "function")
-   assert(type(interpreter.null) == "function")
-   assert(type(interpreter.create) == "function")
+   assert(type(interpreter.state) == "function", "No State")
+   assert(type(interpreter.arrow) == "function", "No Arrow")
+   assert(type(interpreter.pair) == "function", "No Pair")
+   assert(type(interpreter.null) == "function", "No Null")
+   assert(type(interpreter.create) == "function", "No Create")
 end
 
 --------------------------------------------------------------------------------
@@ -1185,19 +1225,28 @@ function state_print_interpreter.state(n, final)
 end
 
 function state_print_interpreter.arrow(from, to, input, output)
+   if input == '' then
+      input = 'ε'
+   end
+   if output == '' then
+      output = 'ε'
+   end
    return string.format("(arrow %d %d %s %s)", from, to, input, output)
 end
 
 function state_print_interpreter.pair(fst, snd)
-   return string.format("(pair %s %s)", fst, snd)
+   if snd == "" then
+      return fst
+   end
+   return string.format("%s %s", fst, snd)
 end
 
 function state_print_interpreter.null()
-   return "null"
+   return ""
 end
 
 function state_print_interpreter.create(states, arrows)
-   local out = string.format("(create (states %s) (arrows %s))", states, arrows)
+   local out = string.format("(create (states (%s)) (arrows (%s)))", states, arrows)
    print(out)
    return out
 end
@@ -1211,14 +1260,50 @@ do
    local sl = sl.l(state_print_interpreter)
 
    sl:state(0, false)
-      :state(1, false)
-      :state(2, true)
-      :arrow(0, 1, 'a', 'a')
-      :arrow(1, 2, 'b', 'b')
-      :create()
+     :state(1, false)
+     :state(2, true)
+     :arrow(0, 1, 'a', 'a')
+     :arrow(1, 2, 'b', 'b')
+     :create()
 
    assert_sl_interpreter(state_print_interpreter)
 end
+
+local flatten = {}
+
+function flatten.state(n, final)
+   return function (s, paired)
+      return s.pair(s.state(n, final), paired)
+   end
+end
+
+function flatten.arrow(from, to, input, output)
+   return function (s, paired)
+      return s.pair(s.arrow(from, to, input, output), paired)
+   end
+end
+
+function flatten.pair(fst, snd)
+   return function (s, paired)
+      return fst(s, snd(s, paired))
+   end
+end
+
+function flatten.null()
+   return function (s, paired)
+      return paired
+   end
+end
+
+function flatten.create(states, arrows)
+   return function (s)
+      local states = states(s, s.null())
+      local arrows = arrows(s, s.null())
+      return s.create(states, arrows)
+   end
+end
+
+assert_sl_interpreter(flatten)
 
 --------------------------------------------------------------------------------
 -- Rules that transform enumerated, finally-marked output
@@ -1242,316 +1327,170 @@ end
 --                                ((arrows b) N1)
 -- TODO star
 --------------------------------------------------------------------------------
-local arrows = {}
+local create_arrows = {}
 
---------------------------------------------------------------------------------
--- An interpreter that creates lists of
--- numbers of final states.
---------------------------------------------------------------------------------
-local fin_lst = {}
-
-function fin_lst.e()
-   return {}
-end
-
-function fin_lst.lit(item)
-   return {}
-end
-
-function fin_lst.star(item)
-   return item
-end
-
-function fin_lst.seq(item1, item2)
-   local out = {}
-   for _, v in ipairs(item1) do
-      table.insert(out, v)
+function create_arrows.e()
+   return function (s, f)
+      local function empty_arrow(previous)
+         return function (current)
+            return s.arrow(previous, current, '', '')
+         end
+      end
+      return f(empty_arrow,
+               remark_fin.e())
    end
-   for _, v in ipairs(item2) do
-      table.insert(out, v)
+end
+
+function create_arrows.lit(lit)
+   return function (s, f)
+      local function lit_arrow(previous)
+         return function (current)
+            return s.arrow(previous, current, lit, lit)
+         end
+      end
+      return f(lit_arrow,
+               remark_fin.lit(lit))
    end
-   return out
 end
 
-function fin_lst.choice(item1, item2)
-   local out = {}
-   for _, v in ipairs(item1) do
-      table.insert(out, v)
+local function extract(arrows, finstates)
+   return arrows, finstates
+end
+
+function create_arrows.seq(rule1, rule2)
+   return function (s, f)
+      local arrows_1, finstates_1 = rule1(s, extract)
+      local arrows_2, finstates_2 = rule2(s, extract)
+      local function seq_arrow(previous)
+         return function (current)
+            -- Go from previous to current
+            local arrows_out = s.pair(s.arrow(previous, current, '', ''),
+                                      s.null())
+            -- Go from current to left
+            arrows_out = s.pair(arrows_1(current), arrows_out)
+            -- Go from fins left to right
+            local fins_left = remark_fin.create(remark_fin.grammar(finstates_1))(list_finstates)
+            for _, v in ipairs(fins_left) do
+               arrows_out = s.pair(arrows_2(v), arrows_out)
+            end
+            return arrows_out
+         end
+      end
+      return f(seq_arrow, remark_fin.seq(finstates_1, finstates_2))
    end
-   for _, v in ipairs(item2) do
-      table.insert(out, v)
+end
+
+function create_arrows.left(item)
+   return function (s, f)
+      local _, finstates = item(s, extract)
+      local function left_arrow(previous)
+         return function (current)
+            local arrows, _ = item(s, extract)
+            local out = s.pair(s.arrow(previous, current, '', ''), s.null())
+            out = s.pair(arrows(current), out)
+            return out
+         end
+      end
+      return f(left_arrow,
+               remark_fin.left(finstates))
    end
-   return out
 end
 
-function fin_lst.ref(rule, rules)
-   assert(false, "Rules should be expanded")
-end
-
-function fin_lst.notfin(item)
-   local out = {}
-   for _, v in ipairs(item) do
-      table.insert(out, v)
+function create_arrows.right(item)
+   return function (s, f)
+      local _, finstates = item(s, extract)
+      local function right_arrow(previous)
+         return function (current)
+            local arrows, _ = item(s, extract)
+            local out = s.pair(s.arrow(previous, current, '', ''), s.null())
+            out = s.pair(arrows(current), out)
+            return out
+         end
+      end
+      return f(right_arrow,
+               remark_fin.right(finstates))
    end
-   return out
 end
 
-function fin_lst.fin(item)
-   local out = fin_lst.notfin(item)
-   table.insert(out, item.n)
-   return out
-end
-
-function fin_lst.mark_n(n, item)
-   local out = {}
-   for _, v in ipairs(item) do
-      table.insert(out, v)
+function create_arrows.fin(item)
+   return function (s, f)
+      local arrows, finstates = item(s, extract)
+      return f(arrows, remark_fin.fin(finstates))
    end
-   out.n = n
-   return out
 end
 
-function fin_lst.create(rules, grammar)
+function create_arrows.notfin(item)
+   return function (s, f)
+      local arrows, finstates = item(s, extract)
+      return f(arrows, remark_fin.notfin(finstates))
+   end
+end
+
+function create_arrows.mark_n(n, item)
+   return function (s, f)
+      local arrows, finstates = item(s, extract)
+      local function mark_n_arrow(previous)
+         return arrows(previous)(n)
+      end
+      return f(mark_n_arrow, remark_fin.mark_n(n, finstates))
+   end
+end
+
+function create_arrows.star(rule1)
+   assert(false, "TODO")
+end
+
+function create_arrows.choice(rule1, rule2)
+   return function (s, f)
+      local arrows_1, finstates_1 = rule1(s, extract)
+      local arrows_2, finstates_2 = rule2(s, extract)
+      local function seq_arrow(previous)
+         return function (current)
+            -- Go from previous to current
+            local arrows_out = s.pair(s.arrow(previous, current, '', ''),
+                                      s.null())
+            -- Go from current to left
+            arrows_out = s.pair(arrows_1(current), arrows_out)
+            -- Go from current to right
+            arrows_out = s.pair(arrows_2(current), arrows_out)
+            return arrows_out
+         end
+      end
+      return f(seq_arrow, remark_fin.choice(finstates_1, finstates_2))
+   end
+end
+
+function create_arrows.grammar(item)
+   return function (s)
+      local arrows, _ = item(s, extract)
+      arrows = arrows(-1)
+      return s.create(s.null(), arrows)
+   end
+end
+
+function create_arrows.ref(item)
+   assert(false, "Refs should be expanded")
+end
+
+function create_arrows.create(grammar)
    return grammar
 end
 
-
-function fin_lst.grammar(item)
-   return item
+--------------------------------------------------------------------------------
+-- Test the arrows interpreter
+--------------------------------------------------------------------------------
+print()
+print("Testing the arrows interpreter")
+do
+   local l = l.l()
+   local arrows = l:rule('A'):is(l:lit('aa'))
+      :rule('B'):is(l:lit('bb'))
+      :rule('K'):is(l:lit('x'))
+      :grammar(l:seq(l:choice(l:ref('A'), l:ref('B')), l:ref('K')))
+      :create(expand_ref)(expand_string)(mark_fin)(enumerate)(create_arrows)(flatten)(state_print_interpreter)
 end
 
-assert_n_interpreter(fin_lst)
-
-local mark_fin_enumerated = {}
-
-function mark_fin_enumerated.create(interpreter)
-   local mark_fin_old = mark_fin.create(interpreter)
-
-   local mark_fin = {}
-
-   function mark_fin.e()
-      return mark_fin_old.e()
-   end
-
-   function mark_fin.lit(lit)
-      return mark_fin_old.lit(lit)
-   end
-
-   function mark_fin.seq(rule1, rule2)
-      return mark_fin_old.seq(rule1, rule2)
-   end
-
-   function mark_fin.choice(rule1, rule2)
-      return mark_fin_old.choice(rule1, rule2)
-   end
-
-   function mark_fin.star(item)
-      return mark_fin_old.star(item)
-   end
-
-   function mark_fin.ref(rule, rules)
-      assert(false, "Ref should be expanded")
-   end
-
-   function mark_fin.grammar(item)
-      return mark_fin_old.grammar(marklasts(item))
-   end
-
-   function mark_fin.create(rules, grammar)
-      return mark_fin_old.create(marklasts(item))
-   end
-
-   function mark_fin.fin(item)
-      return interpreter.fin(item)
-   end
-
-   function mark_fin.notfin(item)
-      return interpreter.notfin(item)
-   end
-
-   function mark_fin.mark_n(item)
-      return interpreter.mark_n(item)
-   end
-
-   return mark_fin
-end
-
-assert_n_interpreter(mark_fin_enumerated.create(fin_lst))
-
-function arrows.create(state_interpreter)
-   local finkind = {}
-   local notfinkind = {}
-   local nkind = {}
-
-   local arrows = {}
-
-   function arrows.e()
-      return {
-         kind = syntax.kinds.e
-      }
-   end
-
-   function arrows.seq(rule1, rule2)
-      return {
-         kind = syntax.kinds.seq,
-         rule1 = rule1,
-         rule2 = rule2
-      }
-   end
-
-   function arrows.lit(lit)
-      return {
-         kind = syntax.kinds.lit,
-         data = lit
-      }
-   end
-
-   function arrows.choice(rule1, rule2)
-      return {
-         kind = syntax.kinds.choice,
-         rule1 = rule1,
-         rule2 = rule2
-      }
-   end
-
-   function arrows.star(item)
-      return {
-         kind = syntax.kinds.star,
-         data = item
-      }
-   end
-
-   function arrows.ref(rule, rules)
-      assert(false, "Refs should be expanded")
-   end
-
-   function arrows.fin(item)
-      return {
-         kind = finkind,
-         item = item
-      }
-   end
-
-   function arrows.notfin(item)
-      return {
-         kind = notfinkind,
-         item = item
-      }
-   end
-
-   function arrows.mark_n(n, item)
-      return {
-         kind = nkind,
-         n = n,
-         item = item
-      }
-   end
-
-   local function rebuild(rule, interpreter)
-      if rule.kind == syntax.kinds.lit then
-         return interpreter.lit(rule.data)
-      end
-      if rule.kind == syntax.kinds.star then
-         return interpreter.star(rebuild(rule.data))
-      end
-      if rule.kind == syntax.kinds.seq then
-         interpreter.seq(rebuild(rule.rule1), reubild(rule.rule2))
-      end
-      if rule.kind == syntax.kinds.choice then
-         return interpreter.choice(rebuild(rule.rule1),
-                                   rebuild(rule.rule2))
-      end
-      if rule.kind == finkind then
-         return interpreter.fin(rebuild(rule.item))
-      end
-      if rule.kind == notfinkind then
-         return interpreter.notfin(rebuild(rule.item))
-      end
-      if rule.kind == nkind then
-         return interpreter.mark_n(rule.n, rebuild(rule.item))
-      end
-      return interpreter.e()
-   end
-
-   function arrows.grammar(item)
-
-      if item.kind == finkind or
-         item.kind == notfinkind
-      then
-         return arrows.grammar(item.item)
-      end
-
-      if item.kind == nkind then
-         local n1 = item.n
-         if item.item.kind == syntax.kinds.e then
-            local function empty_t(n)
-               return {state_interpreter.arrow(n, n1, '', '')}
-            end
-            return empty_t
-         end
-         if item.item.kind == syntax.kinds.lit then
-            local function lit_t(n)
-               return {state_interpreter.arrow(n, n1, item.item.data, item.item.data)}
-            end
-            return lit_t
-         end
-         if item.item.kind == syntax.kinds.seq then
-            local n2 = item.item.rule1.item.n
-            local n3 = item.item.rule2.item.n
-
-            local fins = rebuild(item.item.rule1,
-                                 mark_fin_enumerated.create(fin_lst))
-            local function seq_t(n)
-               local out = {}
-               local nton1 = state_interpreter.arrow(n, n1, '', '')
-               table.insert(out, nton1)
-               for _, v in ipairs(arrows.grammar(item.item.rule1)(n1)) do
-                  table.insert(out, v)
-               end
-               for _, v in ipairs(fins) do
-                  for _, o in ipairs(arrows.grammar(item.item.rule2)(v)) do
-                     table.insert(out, o)
-                  end
-               end
-               return out
-            end
-            return seq_t
-         end
-         if item.item.kind == syntax.kinds.choice then
-            local function choice_t(n)
-               local out = {}
-               local nton1 = state_interpreter.arrow(n, n1, '', '')
-               table.insert(out, nton1)
-
-               local a = arrows.grammar(item.item.rule1)
-               local b = arrows.grammar(item.item.rule2)
-               for _, v in ipairs(a(n1)) do
-                  table.insert(out, v)
-               end
-               for _, v in pairs(b(n1)) do
-                  table.insert(out, v)
-               end
-               return out
-            end
-            return choice_t
-         end
-      end
-      rebuild(item)
-   end
-
-   function arrows.create(rules, grammar)
-      return grammar
-   end
-
-   function arrows.star(item)
-      assert(false, "TODO star")
-   end
-
-   return arrows
-end
-
-assert_n_interpreter(arrows.create(state_print_interpreter))
-
+assert_n_interpreter(create_arrows)
 --------------------------------------------------------------------------------
 -- An interpreter that takes in enumerated, finally-marked
 -- PEGREG syntax and translates it to calls to the
@@ -1559,112 +1498,78 @@ assert_n_interpreter(arrows.create(state_print_interpreter))
 --------------------------------------------------------------------------------
 local create_states = {}
 
-function create_states.create(state_interpreter)
-   assert_sl_interpreter(state_interpreter)
-
-   local create_states = {}
-   local nkind = {}
-   local finkind = {}
-   local notfinkind = {}
-
-   function create_states.e()
-      return {
-         kind = syntax.kinds.e
-      }
+function create_states.e()
+   return function (i, t)
+      return i.null()
    end
+end
 
-   function create_states.lit(lit)
-      return {
-         kind = syntax.kinds.lit,
-         data = lit
-      }
+function create_states.lit(lit)
+   return function (i, t)
+      return i.null()
    end
+end
 
-   function create_states.seq(rule1, rule2)
-      return {
-         kind = syntax.kinds.seq,
-         rule1 = rule1,
-         rule2 = rule2
-      }
+function create_states.seq(rule1, rule2)
+   return function (i, t)
+      local left = rule1(i, t)
+      local right = rule2(i, t)
+      return i.pair(left, right)
    end
+end
 
-   function create_states.choice(rule1, rule2)
-      return {
-         kind = syntax.kinds.choice,
-         rule1 = rule1,
-         rule2 = rule2
-      }
+function create_states.choice(rule1, rule2)
+   return function (i, t)
+      local left = rule1(i, t)
+      local right = rule2(i, t)
+      return i.pair(left, right)
    end
+end
 
+function create_states.star(item)
+   return item
+end
 
-   function create_states.star(item)
-      return {
-         kind = syntax.kinds.star,
-         item = item
-      }
+function create_states.left(item)
+   return item
+end
+
+function create_states.right(item)
+   return item
+end
+
+function create_states.fin(item)
+   return function (i, t)
+      return item(i, true)
    end
+end
 
-   function create_states.fin(item)
-      return {
-         kind = finkind,
-         item = item
-      }
+function create_states.notfin(item)
+   return function (i, t)
+      return item(i, false)
    end
+end
 
-   function create_states.notfin(item)
-      return {
-         kind = notfinkind,
-         item = item
-      }
+function create_states.mark_n(n, item)
+   return function (i, t)
+      return i.pair(i.state(n, t), item(i, t))
    end
+end
 
-   function create_states.mark_n(item, n)
-      return {
-         kind = nkind,
-         item = item,
-         n = n
-      }
+function create_states.grammar(item)
+   return function (i)
+      return item(i, false)
    end
+end
 
-   function create_states.ref(rule, rules)
-      assert(false, "Refs ought to be expanded")
+function create_states.ref(rule, rules)
+   assert(false, "Refs ought to be expanded")
+end
+
+function create_states.create(grammar)
+   return function (i)
+      return i.create(grammar(i), i.null())
    end
-
-   function create_states.grammar(item)
-      local sstack = {[1] = item}
-      local states = state_interpreter.null()
-      local final = false
-      while #sstack > 0 do
-         local top = sstack[#sstack]
-         sstack[#sstack] = nil
-         if top.kind == finkind or
-            top.kind == notfinkind
-         then
-            local state = state_interpreter.state(top.item.n, true)
-            states = state_interpreter.pair(state, states)
-         elseif top.kind == nkind then
-            local state = state_interpreter.state(top.n, false)
-            states = state_interpreter.pair(state, states)
-            sstack[#sstack + 1] = top.item
-         elseif top.kind == syntax.kinds.seq or
-                top.kind == syntax.kinds.choice
-         then
-            sstack[#sstack + 1] = top.rule1
-            sstack[#sstack + 1] = top.rule2
-         end
-      end
-
-      local astack = {[1] = item}
-      local arrows = state_interpreter.null()
-      return state_interpreter.create(states, arrows)
-   end
-
-   function create_states.create(rules, grammar)
-      -- Convert to a state language here
-      return grammar
-   end
-
-   return create_states
 end
 
 --------------------------------------------------------------------------------
@@ -1673,15 +1578,131 @@ end
 print()
 print("Testing the create states interpreter")
 do
-   local interpreter = expand_string.create(expand_ref.create(mark_fin.create(enumerate.create(create_states.create(state_print_interpreter)))))
+   local interpreter = expand_string.create()
    local l = l.l(interpreter)
    l:rule('A'):is(l:lit('aa'))
       :rule('B'):is(l:lit('bb'))
       :rule('K'):is(l:lit('x'))
       :grammar(l:seq(l:choice(l:ref('A'), l:ref('B')), l:ref('A')))
-      :create()
+      :create(expand_ref)(expand_string)(mark_fin)(enumerate)(create_states)(flatten)(state_print_interpreter)
 end
 
+--------------------------------------------------------------------------------
+-- States and arrows
+--------------------------------------------------------------------------------
+local state_arrow = {}
+
+function state_arrow.e()
+   return function (f)
+      return f(create_states.e(), create_arrows.e())
+   end
+end
+
+function state_arrow.lit(lit)
+   return function(f)
+      return f(create_states.lit(lit), create_arrows.lit(lit))
+   end
+end
+
+local function extract(states, arrows)
+   return states, arrows
+end
+
+function state_arrow.seq(item1, item2)
+   local states_1, arrows_1 = item1(extract)
+   local states_2, arrows_2 = item2(extract)
+   return function (f)
+      return f(create_states.seq(states_1, states_2), create_arrows.seq(arrows_1, arrows_2))
+   end
+end
+
+function state_arrow.choice(item1, item2)
+   local states_1, arrows_1 = item1(extract)
+   local states_2, arrows_2 = item2(extract)
+   return function (f)
+      return f(create_states.choice(states_1, states_2), create_arrows.choice(arrows_1, arrows_2))
+   end
+end
+
+function state_arrow.grammar(item)
+   return item
+end
+
+function state_arrow.ref(rule, rules)
+   assert(false, "Refs should be expanded")
+end
+
+function state_arrow.create(grammar)
+   local states, arrows = grammar(extract)
+   return function (s)
+      local arrows = arrows(s, function (a, b) return a end)(-1)
+      return s.create(states, arrows)
+   end
+end
+
+function state_arrow.left(item)
+   local states, arrows = item(extract)
+   return function (f)
+      return f(create_states.left(states), create_arrows.left(arrows))
+   end
+end
+
+function state_arrow.right(item)
+   local states, arrows = item(extract)
+   return function (f)
+      return f(create_states.right(states), create_arrows.right(arrows))
+   end
+end
+
+function state_arrow.fin(item)
+   local states, arrows = item(extract)
+   return function (f)
+      return f(create_states.fin(states), create_arrows.fin(arrows))
+   end
+end
+
+function state_arrow.notfin(item)
+   local states, arrows = item(extract)
+   return function (f)
+      return f(create_states.notfin(states), create_arrows.notfin(arrows))
+   end
+end
+
+function state_arrow.mark_n(n, item)
+   local states, arrows = item(extract)
+   return function (f)
+      return f(create_states.mark_n(n, states), create_arrows.mark_n(n, arrows))
+   end
+end
+
+function state_arrow.star(item)
+   assert(false, "TODO")
+end
+
+assert_n_interpreter(state_arrow)
+--------------------------------------------------------------------------------
+-- Test the create states and arrow interpreter
+--------------------------------------------------------------------------------
+print()
+print("Testing the create states and arrow interpreter")
+print("From:")
+do
+   local l = l.l()
+   local arrows = l:rule('A'):is(l:lit('aa'))
+      :rule('B'):is(l:lit('bb'))
+      :rule('K'):is(l:lit('x'))
+      :grammar(l:seq(l:choice(l:ref('A'), l:ref('B')), l:ref('K')))
+      :create(expand_ref)(expand_string)(add_left_right)(mark_fin)(enumerate)(n_print_interpreter)
+end
+print("To:")
+do
+   local l = l.l()
+   local arrows = l:rule('A'):is(l:lit('aa'))
+      :rule('B'):is(l:lit('bb'))
+      :rule('K'):is(l:lit('x'))
+      :grammar(l:seq(l:choice(l:ref('A'), l:ref('B')), l:ref('K')))
+      :create(expand_ref)(expand_string)(add_left_right)(mark_fin)(enumerate)(state_arrow)(flatten)(state_print_interpreter)
+end
 --------------------------------------------------------------------------------
 -- An interpreter that compiles to a tape
 --------------------------------------------------------------------------------
