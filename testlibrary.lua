@@ -1,91 +1,36 @@
-local fst_fast = require("library")
+local luaunit = require("luaunit")
+local lfs = require("lfs")
 
-local it = fst_fast.instruction_tape.open()
+local src_requires = {}
+local test_requires = {}
+local name_to_suite = {}
 
--- State 0
 do
-   local ins = it:instr(6)
-   ins:initial()
-   do
-      local fse = ins:get_outgoing('a')
-      fse:set_outstate(1)
-      fse:set_outchar('a')
+   for file in lfs.dir(".") do
+      if file:sub(1, 4) == "Test" and
+         file:sub(-4, -1) == ".lua"
+      then
+         local suite = dofile(file)
+         local name = file:sub(1, -5)
+         name_to_suite[name] = suite
+         _G[name] = suite
+         print("name is: ", name)
+         test_requires[name] = suite:testRequires()
+         suite.luaunit = luaunit
+         for _, v in ipairs(suite:srcRequires()) do
+            if src_requires[v] == nil then
+               src_requires[v] = require(v)
+            end
+            suite[v] = src_requires[v]
+         end
+      end
    end
-   ins:finish()
-end
-
--- State 1
-do
-   local ins = it:instr(6)
-   ins:initial()
-   do
-      local fse = ins:get_outgoing('a')
-      fse:set_outstate(2)
-      fse:set_outchar('a')
+   for name, requires in pairs(test_requires) do
+      local suite = name_to_suite[name]
+      for _, v in ipairs(requires) do
+         suite[v] = name_to_suite[v]
+      end
    end
-   do
-      local fse = ins:get_outgoing('b')
-      fse:set_outstate(4)
-      fse:set_outchar('b')
-   end
-   ins:finish()
 end
 
--- State 2
-do
-   local ins = it:instr(6)
-   do
-      local fse = ins:get_outgoing('x')
-      fse:set_outstate(3)
-      fse:set_outchar('x')
-   end
-   ins:finish()
-end
-
--- State 3
-do
-   local ins = it:instr(6)
-   ins:final()
-   do end
-   ins:finish()
-end
-
--- State 4
-do
-   local ins = it:instr(6)
-   do
-      local fse = ins:get_outgoing('x')
-      fse:set_outstate(5)
-      fse:set_outchar('x')
-   end
-   ins:finish()
-end
-
--- State 5
-do
-   local ins = it:instr(6)
-   ins:final()
-   do end
-   ins:finish()
-end
-
--- State 6
-do
-   local ins = it:instr(6)
-   do end
-   ins:finish()
-end
-
--- Match string
-outstr, match_success, matched_states = it:match_string("aax")
-
-for i = 1, #outstr do
-   the_char = outstr:sub(i, i)
-   the_state = matched_states[i]
-   print("The char ", the_char, " matched with the state ", the_state)
-end
-
--- Develop from here on out in Lua
--- OR build up C to lua interface
-
-it:close()
+os.exit(luaunit.LuaUnit.run())
