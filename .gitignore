@@ -59,4 +59,7 @@ dkms.conf
 
 fst_fast
 
-fst_fast_runner
+fst_fast_runner/luarocks
+/lua
+/lua_modules
+/.luarocks

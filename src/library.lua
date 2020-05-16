@@ -1,5 +1,5 @@
 local fst_fast = {}
-local c_lib = require("fst_fast")
+local c_lib = require("fst_fast_system")
 
 fst_fast.instruction_tape = {}
 
@@ -121,7 +121,7 @@ end
 -- (A/B)K
 --
 -- (or (A|B)K)
-local l = require("language")
+-- local l = require("language")
 
 -- While not enforcable, the types for interpreters work like so:
 -- Interpreter takes in two types, the "working" type
@@ -134,9 +134,9 @@ local l = require("language")
 -- and, for example, strings in the target type
 -- while still retaining the layering of interpreters.
 
-local print_syntax = require("print_syntax")
+-- local print_syntax = require("print_syntax")
 
-l.assert_pegreg_interpreter(print_syntax)
+-- l.assert_pegreg_interpreter(print_syntax)
 
 -- Current language:
 -- (create (rules (rule K (lit x))
@@ -179,23 +179,23 @@ l.assert_pegreg_interpreter(print_syntax)
 -- before and after enumeration,
 -- and the transform could be changed to simply reference K.
 
-local sc_to_cs = require("sc_to_cs")
+-- local sc_to_cs = require("sc_to_cs")
 
-local expand_string = require("expand_string")
+-- local expand_string = require("expand_string")
 
-local expand_ref = require("expand_ref")
+-- local expand_ref = require("expand_ref")
 
-local add_left_right = require("add_left_right")
+-- local add_left_right = require("add_left_right")
 
-l.assert_pegreg_interpreter(add_left_right)
+-- l.assert_pegreg_interpreter(add_left_right)
 
-local print_lr = require("print_lr")
+-- local print_lr = require("print_lr")
 
-local mark_fin = require("mark_fin")
+-- local mark_fin = require("mark_fin")
 
-local print_fin = require("print_fin")
+-- local print_fin = require("print_fin")
 
-local print_fst = require("print_fst")
+-- local print_fst = require("print_fst")
 
 -- Now that we have all of the "states" of our nondeterministic FST,
 -- we will want to enumerate them.
@@ -206,28 +206,28 @@ local print_fst = require("print_fst")
 -- and numbers all the nodes.
 -- Adds the method "mark_n"
 ---------------------------------------------------------------------------
-local enumerate = require("enumerate")
+-- local enumerate = require("enumerate")
 
-local print_n = require("print_n")
+-- local print_n = require("print_n")
 
-local list_fin = require("list_fin")
+-- local list_fin = require("list_fin")
 
-local remark_fin = require("remark_fin")
+-- local remark_fin = require("remark_fin")
 
-local fstl = require("fst_language")
+-- local fstl = require("fst_language")
 
-local flatten = require("flatten")
+-- local flatten = require("flatten")
 
-local create_arrows = require("create_arrows")
+-- local create_arrows = require("create_arrows")
 
-local create_states = require("create_states")
+-- local create_states = require("create_states")
 
-local state_arrow = require("state_arrow")
+-- local state_arrow = require("state_arrow")
 
 --------------------------------------------------------------------------------
 -- An interpreter that compiles to a tape
 --------------------------------------------------------------------------------
-local compiler_interpreter = {}
+-- local compiler_interpreter = {}
 
 -- translate 'aa' into
 -- seq(lit('a'), seq(lit('a'), K))
