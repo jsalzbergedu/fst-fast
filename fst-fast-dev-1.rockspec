@@ -14,12 +14,13 @@ description = {
 build = {
    type = "builtin",
    modules = {
-      fst_fast = "src/library.lua"
+      fst_fast = "src/fst_fast.lua"
    }
 }
 
 test_dependencies = {
-   "luaunit >= 3"
+   "luaunit >= 3",
+   "luafilesystem >= 1.8"
 }
 
 test = {

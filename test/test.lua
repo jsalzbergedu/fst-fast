@@ -1,7 +1,9 @@
-local fst_fast = require("fst_fast")
 local luaunit = require("luaunit")
 
-function testInstructionTape()
+package.path =  "src/?.lua;" .. package.path
+local fst_fast = require("fst_fast")
+
+local function getIt()
    local it = fst_fast.instruction_tape.open()
 
    -- State 0
@@ -78,6 +80,12 @@ function testInstructionTape()
    ins:finish()
    end
 
+   return it
+end
+
+function testInstructionTape()
+   local it = getIt()
+
    -- Match string
    local outstr, match_success, matched_states = it:match_string("aax")
 
@@ -87,7 +95,28 @@ function testInstructionTape()
 
    luaunit.assertEquals(matched_states, {1, 2, 3})
 
-   it:close()
+end
+
+function testInspector()
+   local tape = getIt()
+   fst_fast.inspector.dumpfile(tape, "/tmp/dump.bin")
+   local tape2 = fst_fast.inspector.loadfile("/tmp/dump.bin")
+
+   local outstr, match_success, matched_states = tape2:match_string("aax")
+
+   luaunit.assertEquals(outstr, "aax", "Outstr incorrect")
+
+   luaunit.assertTrue(match_success, "Match should succeed")
+
+   luaunit.assertEquals(matched_states, {1, 2, 3})
+
+   for i = 0, 6, 1 do
+      luaunit.assertTrue(fst_fast.inspector.isvalid(tape, i))
+   end
+
+   for i = 0, 6, 1 do
+      luaunit.assertTrue(fst_fast.inspector.isvalid(tape2, i))
+   end
 
 end
 

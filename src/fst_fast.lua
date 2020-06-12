@@ -8,17 +8,20 @@ fst_fast.instruction_tape = {}
 --         Then add cont-pass layer and possessive ordered
 --         choice, possesive star as layers
 
+
+
 --------------------------------------------------------------------------------
 -- Create an instruction tape.
 -- This is the "low level" functionality that
 -- wraps the unsafe C functions and creates a heirarchical organization.
+-- If IT is specified, then use IT instead of opening a new tape.
 --------------------------------------------------------------------------------
-function fst_fast.instruction_tape.open()
+function fst_fast.instruction_tape.open(it)
    local tape = {}
    -----------------------------------------------------------------------------
    -- The pointer to the instruction tape
    -----------------------------------------------------------------------------
-   tape.__it = c_lib.get_instruction_tape()
+   tape.__it = it or c_lib.get_instruction_tape()
    -----------------------------------------------------------------------------
    -- Whether the instruction tape is valid
    -----------------------------------------------------------------------------
@@ -31,6 +34,15 @@ function fst_fast.instruction_tape.open()
       c_lib.instruction_tape_destroy(self.__it)
       self.__it_isvalid = false;
    end
+
+   local tape_mt = {}
+
+   function tape_mt.__gc(tape)
+      tape:close()
+   end
+
+   setmetatable(tape, tape_mt)
+
    -----------------------------------------------------------------------------
    -- A method to clear a new instruction.
    -- The number that this method takes should be the error state.
@@ -112,6 +124,49 @@ function fst_fast.instruction_tape.open()
 
    return tape
 end
+
+-----------------------------------------------------------------------------
+-- Tape inspector (for debugging purposes)
+-----------------------------------------------------------------------------
+local inspector = {}
+
+function inspector.length(tape)
+   return c_lib.inspector_get_length(tape.__it)
+end
+
+function inspector.__checklength(n, tape)
+   assert(n < inspector.length(tape), tostring(n) .. " out of range")
+end
+
+function inspector.isvalid(tape, n)
+   inspector.__checklength(n, tape)
+   return c_lib.inspector_is_valid(tape.__it, n)
+end
+
+function inspector.isfinal(tape, n)
+   inspector.__checklength(n, tape)
+   return c_lib.inspector_is_final(tape.__it, n)
+end
+
+function inspector.isinitial(tape, n)
+   inspector.__checklength(n, tape)
+   return c_lib.inspector_is_initial(tape.__it, n)
+end
+
+function inspector.outgoings(tape, n)
+   inspector.__checklength(n, tape)
+   return c_lib.inspector_outgoings(tape.__it, n)
+end
+
+function inspector.dumpfile(tape, filename)
+   return c_lib.inspector_dumpfile(tape.__it, filename)
+end
+
+function inspector.loadfile(filename)
+   return fst_fast.instruction_tape.open(c_lib.inspector_loadfile(filename))
+end
+
+fst_fast.inspector = inspector
 
 -- Want to go from
 --
